@@ -6,6 +6,7 @@ const newChatBtn    = document.getElementById('new-chat-btn');
 const messagesEl    = document.getElementById('messages');
 const welcomeEl     = document.getElementById('welcome');
 const chatInput     = document.getElementById('chat-input');
+const chatModelSelect = document.getElementById('chat-model-select');
 const sendBtn       = document.getElementById('send-btn');
 const ctxBar        = document.getElementById('ctx-bar');
 const ctxTokens     = document.getElementById('ctx-tokens');
@@ -21,6 +22,13 @@ let isStreaming       = false;
 const urlParams  = new URLSearchParams(window.location.search);
 const projectId  = urlParams.get('project_id') || null;
 const initSession = urlParams.get('session_id') || null;
+const savedChatModel = localStorage.getItem('chatModelTier');
+if (savedChatModel && chatModelSelect) chatModelSelect.value = savedChatModel;
+if (chatModelSelect) {
+  chatModelSelect.addEventListener('change', () => {
+    localStorage.setItem('chatModelTier', chatModelSelect.value);
+  });
+}
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 async function init() {
@@ -240,6 +248,7 @@ async function sendMessage() {
   if (isStreaming) return;
   const text = chatInput.value.trim();
   if (!text) return;
+  const modelTier = chatModelSelect?.value || 'pro';
 
   chatInput.value = '';
   chatInput.style.height = 'auto';
@@ -306,7 +315,12 @@ async function sendMessage() {
     const res = await fetch('/chat/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id: currentSessionId, message: text, project_id: projectId }),
+      body: JSON.stringify({
+        session_id: currentSessionId,
+        message: text,
+        project_id: projectId,
+        model_tier: modelTier,
+      }),
     });
 
     if (!res.ok) {

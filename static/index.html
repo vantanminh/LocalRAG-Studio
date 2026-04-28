@@ -72,6 +72,13 @@
         placeholder="Type your question here..."
         rows="3"
       ></textarea>
+      <div class="model-row">
+        <label for="ask-model-select">DeepSeek model</label>
+        <select id="ask-model-select" class="model-select">
+          <option value="pro" selected>Pro</option>
+          <option value="flash">Flash</option>
+        </select>
+      </div>
       <button id="ask-btn" class="btn">Ask</button>
       <div id="ask-status" class="status hidden"></div>
     </section>

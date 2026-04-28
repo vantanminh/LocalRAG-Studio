@@ -21,7 +21,10 @@ EMBED_MODEL         = os.getenv("EMBED_MODEL", "qwen/qwen3-embedding-8b")
 
 DEEPSEEK_API_KEY    = os.getenv("DEEPSEEK_API_KEY")
 DEEPSEEK_BASE_URL   = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
-LLM_MODEL           = os.getenv("LLM_MODEL", "deepseek-chat")
+LLM_MODEL_PRO       = os.getenv("LLM_MODEL_PRO", os.getenv("LLM_MODEL", "deepseek-v4-pro"))
+LLM_MODEL_FLASH     = os.getenv("LLM_MODEL_FLASH", "deepseek-v4-flash")
+DEFAULT_LLM_TIER    = os.getenv("DEFAULT_LLM_TIER", "pro").strip().lower()
+LLM_MODELS          = {"pro": LLM_MODEL_PRO, "flash": LLM_MODEL_FLASH}
 
 CHUNK_SIZE      = 1200
 CHUNK_OVERLAP   = 200
@@ -81,6 +84,9 @@ SEARCH_TOOL = {
 }
 
 MAX_TOOL_CALLS = 5
+
+if DEFAULT_LLM_TIER not in LLM_MODELS:
+    DEFAULT_LLM_TIER = "pro"
 
 # ── clients ───────────────────────────────────────────────────────────────────
 
@@ -246,6 +252,13 @@ def count_filtered(project_id: str | None) -> int:
         return 0
 
 
+def resolve_llm_model(model_tier: str | None) -> tuple[str, str]:
+    tier = (model_tier or DEFAULT_LLM_TIER).strip().lower()
+    if tier not in LLM_MODELS:
+        raise HTTPException(status_code=400, detail="model_tier must be 'pro' or 'flash'.")
+    return tier, LLM_MODELS[tier]
+
+
 def build_chat_histories(session: dict) -> tuple[list[dict], list[dict]]:
     tool_history = []
     thinking_history = []
@@ -378,6 +391,7 @@ def list_files(project_id: str | None = Query(None)):
 
 class AskRequest(BaseModel):
     question: str
+    model_tier: str | None = None
 
 
 @app.post("/ask")
@@ -385,6 +399,7 @@ def ask_question(body: AskRequest):
     question = body.question.strip()
     if not question:
         raise HTTPException(status_code=400, detail="Question must not be empty.")
+    model_tier, llm_model = resolve_llm_model(body.model_tier)
 
     if collection.count() == 0:
         raise HTTPException(
@@ -418,7 +433,7 @@ def ask_question(body: AskRequest):
 
     try:
         response = llm_client.chat.completions.create(
-            model=LLM_MODEL,
+            model=llm_model,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": user_message},
@@ -436,7 +451,7 @@ def ask_question(body: AskRequest):
             seen.add(key)
             sources.append({"source": m["source"], "chunk_index": m["chunk_index"]})
 
-    return {"answer": answer, "sources": sources}
+    return {"answer": answer, "sources": sources, "model_tier": model_tier, "model": llm_model}
 
 
 # ── /ask/stream ───────────────────────────────────────────────────────────────
@@ -446,6 +461,7 @@ def ask_stream(body: AskRequest):
     question = body.question.strip()
     if not question:
         raise HTTPException(status_code=400, detail="Question must not be empty.")
+    model_tier, llm_model = resolve_llm_model(body.model_tier)
     if collection.count() == 0:
         raise HTTPException(status_code=400, detail="No documents have been indexed yet.")
 
@@ -502,7 +518,7 @@ def ask_stream(body: AskRequest):
 
         try:
             stream = llm_client.chat.completions.create(
-                model=LLM_MODEL,
+                model=llm_model,
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": user_message},
@@ -542,7 +558,7 @@ def ask_stream(body: AskRequest):
                 seen.add(key)
                 sources.append({"source": m["source"], "chunk_index": m["chunk_index"]})
 
-        yield send({"type": "done", "sources": sources})
+        yield send({"type": "done", "sources": sources, "model_tier": model_tier, "model": llm_model})
 
     return StreamingResponse(
         event_stream(),
@@ -597,6 +613,7 @@ class ChatRequest(BaseModel):
     session_id: str | None = None
     message: str
     project_id: str | None = None
+    model_tier: str | None = None
 
 
 @app.post("/chat/stream")
@@ -605,6 +622,7 @@ def chat_stream(body: ChatRequest):
     if not message:
         raise HTTPException(status_code=400, detail="Message must not be empty.")
 
+    model_tier, llm_model = resolve_llm_model(body.model_tier)
     project_id = body.project_id or None
     session_id = body.session_id
     session = load_chat_session(session_id) if session_id else None
@@ -616,6 +634,7 @@ def chat_stream(body: ChatRequest):
             "created_at": datetime.datetime.now().isoformat(),
             "messages": [],
             "project_id": project_id,
+            "model_tier": model_tier,
         }
 
     has_docs = count_filtered(project_id) > 0
@@ -658,7 +677,7 @@ def chat_stream(body: ChatRequest):
                 })
                 try:
                     stream = llm_client.chat.completions.create(
-                        model=LLM_MODEL,
+                        model=llm_model,
                         messages=tool_messages,
                         tools=[SEARCH_TOOL],
                         tool_choice="auto",
@@ -802,7 +821,7 @@ def chat_stream(body: ChatRequest):
 
         try:
             stream = llm_client.chat.completions.create(
-                model=LLM_MODEL,
+                model=llm_model,
                 messages=synthesis_messages,
                 stream=True,
                 stream_options={"include_usage": True},
@@ -854,8 +873,11 @@ def chat_stream(body: ChatRequest):
             "sources":          all_sources,
             "timestamp":        now,
             "usage":            usage,
+            "model_tier":       model_tier,
+            "model":            llm_model,
         })
         session["last_usage"] = usage
+        session["model_tier"] = model_tier
         save_chat_session(session)
 
         yield send({
@@ -864,6 +886,8 @@ def chat_stream(body: ChatRequest):
             "session_id":     session_id,
             "usage":          usage,
             "context_window": CONTEXT_WINDOW,
+            "model_tier":     model_tier,
+            "model":          llm_model,
         })
 
     return StreamingResponse(

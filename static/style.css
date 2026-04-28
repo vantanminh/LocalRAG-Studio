@@ -136,6 +136,36 @@ textarea:focus {
   background: #fff;
 }
 
+.model-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: -0.15rem 0 0.9rem;
+  font-size: 0.88rem;
+  color: #555;
+}
+
+.model-row label {
+  font-weight: 600;
+}
+
+.model-select {
+  min-width: 120px;
+  padding: 0.45rem 0.7rem;
+  border: 1px solid #ccd3de;
+  border-radius: 7px;
+  background: #fafbfc;
+  color: #1a1a2e;
+  font: inherit;
+  cursor: pointer;
+}
+
+.model-select:focus {
+  outline: none;
+  border-color: #4a7efa;
+  background: #fff;
+}
+
 /* Button */
 .btn {
   display: inline-block;

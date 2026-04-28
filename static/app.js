@@ -15,6 +15,7 @@ const filesList      = document.getElementById('files-list');
 const questionInput  = document.getElementById('question-input');
 const askBtn         = document.getElementById('ask-btn');
 const askStatus      = document.getElementById('ask-status');
+const askModelSelect = document.getElementById('ask-model-select');
 
 const answerSection  = document.getElementById('answer-section');
 const answerText     = document.getElementById('answer-text');
@@ -155,6 +156,14 @@ async function loadFiles() {
 
 loadFiles();
 
+const savedAskModel = localStorage.getItem('askModelTier');
+if (savedAskModel && askModelSelect) askModelSelect.value = savedAskModel;
+if (askModelSelect) {
+  askModelSelect.addEventListener('change', () => {
+    localStorage.setItem('askModelTier', askModelSelect.value);
+  });
+}
+
 // ── Thinking toggle ───────────────────────────────────────────────────────────
 thinkingToggle.addEventListener('click', () => {
   thinkingBody.classList.toggle('hidden');
@@ -176,6 +185,8 @@ askBtn.addEventListener('click', async () => {
     return;
   }
 
+  const modelTier = askModelSelect?.value || 'pro';
+
   askBtn.disabled = true;
   hideStatus(askStatus);
   answerSection.style.display = 'none';
@@ -190,7 +201,7 @@ askBtn.addEventListener('click', async () => {
     const res = await fetch('/ask/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question }),
+      body: JSON.stringify({ question, model_tier: modelTier }),
     });
 
     if (!res.ok) {
