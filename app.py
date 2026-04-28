@@ -544,13 +544,21 @@ def chat_stream(body: ChatRequest):
 
         yield send({"type": "session", "session_id": session_id})
 
-        # Build history with reasoning_content so DeepSeek thinking mode works
-        history = []
+        # Keep two histories:
+        # - tool_history is plain OpenAI chat history for the non-thinking tool loop.
+        # - thinking_history includes DeepSeek reasoning_content for thinking-mode turns.
+        tool_history = []
+        thinking_history = []
         for m in session["messages"]:
             msg: dict = {"role": m["role"], "content": m["content"]}
-            if m["role"] == "assistant" and m.get("reasoning_content"):
-                msg["reasoning_content"] = m["reasoning_content"]
-            history.append(msg)
+            tool_history.append(msg)
+
+            thinking_msg = dict(msg)
+            if m["role"] == "assistant":
+                reasoning_content = m.get("reasoning_content") or m.get("thinking")
+                if reasoning_content:
+                    thinking_msg["reasoning_content"] = reasoning_content
+            thinking_history.append(thinking_msg)
 
         all_sources:       list = []
         seen_sources:      set  = set()
@@ -563,7 +571,7 @@ def chat_stream(body: ChatRequest):
         if has_docs:
             tool_messages = (
                 [{"role": "system", "content": AGENTIC_SYSTEM_PROMPT}]
-                + history
+                + tool_history
                 + [{"role": "user", "content": message}]
             )
             tool_call_count = 0
@@ -677,7 +685,7 @@ def chat_stream(body: ChatRequest):
 
         synthesis_messages = (
             [{"role": "system", "content": CHAT_SYSTEM_PROMPT}]
-            + history
+            + thinking_history
             + [{"role": "user", "content": synthesis_user_content}]
         )
 
