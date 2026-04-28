@@ -47,32 +47,63 @@ CHAT_SYSTEM_PROMPT = (
     "Be conversational and concise. If the context doesn't have enough information, say so honestly."
 )
 
-AGENTIC_SYSTEM_PROMPT = (
-    "You are a helpful assistant with access to a document search tool. "
-    "When answering questions, use the search_documents tool to find relevant information from uploaded documents. "
-    "You can call the tool multiple times with different queries to gather comprehensive information. "
-    "Only give your final answer after you have gathered enough information. "
-    "If the documents don't contain relevant information after searching, say so honestly."
-)
+AGENTIC_SYSTEM_PROMPT = """\
+You are an expert research assistant with access to a knowledge base of uploaded documents. \
+Your job is to give thorough, accurate answers grounded exclusively in those documents.
+
+The complete list of files in the knowledge base is provided to you below (in the ## Knowledge base section). \
+You already know exactly what documents exist — use this information to plan your searches.
+
+## Tool available
+- **search_documents** — Semantic vector search that retrieves the most relevant document chunks \
+for a given query. You have a budget of 6 searches; use them wisely.
+
+## Workflow
+1. **Plan first** — Read the file list, identify which files are relevant to the question, \
+and decide what angles need to be covered before issuing any search.
+2. **Search methodically** — Run separate, focused searches for each sub-topic or angle. \
+For a complex question, 3–5 searches are typical. For a simple lookup, 1–2 may suffice.
+3. **Cover all relevant files** — If multiple files likely contain relevant content, \
+make sure your queries are broad enough (or varied enough) to surface chunks from each of them.
+4. **Vary your queries** — Each search must use a different phrasing, perspective, or keyword set. \
+Never repeat an identical query. If results are weak, try a narrower or rephrased version.
+5. **Stop when confident** — Stop searching once you have enough context to answer completely, \
+or when you have used all 6 searches.
+
+## Search strategy tips
+- Prefer specific, focused queries over generic ones.
+- If a filename hints at relevance (e.g. "System_Design.pdf"), include a distinctive term \
+from that file's domain in your query to steer retrieval toward it.
+- Break multi-part questions into individual searches — one per sub-question.
+- Use top_k=8 for broad topics expected across many chunks; top_k=3–4 for narrow factual lookups.
+
+## Answer quality
+- Base every claim strictly on retrieved document content — never invent or extrapolate.
+- Synthesize a well-structured, complete answer after all searches.
+- If the documents genuinely lack the information after thorough searching, say so clearly \
+and name the files that were checked.
+- Cite the source document for key facts when it adds clarity.\
+"""
 
 SEARCH_TOOL = {
     "type": "function",
     "function": {
         "name": "search_documents",
         "description": (
-            "Search through uploaded documents to find relevant information. "
-            "Returns the most relevant document chunks for the given query."
+            "Semantic vector search through uploaded documents. "
+            "Returns the most relevant chunks for the given query. "
+            "Use specific, focused queries for best results."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "The search query to find relevant information",
+                    "description": "Specific search query to find relevant information",
                 },
                 "top_k": {
                     "type": "integer",
-                    "description": "Number of chunks to retrieve (1–8, default 5)",
+                    "description": "Number of chunks to retrieve (1–8, default 5). Use 8 for broad topics, 3–4 for specific lookups.",
                     "default": 5,
                     "minimum": 1,
                     "maximum": 8,
@@ -83,7 +114,25 @@ SEARCH_TOOL = {
     },
 }
 
-MAX_TOOL_CALLS = 5
+LIST_DOCUMENTS_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "list_documents",
+        "description": (
+            "List all documents available in the knowledge base with their filenames and chunk counts. "
+            "Always call this first before any search so you know what files exist and can plan your searches accordingly."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+}
+
+AGENT_TOOLS = [SEARCH_TOOL]  # list_documents is auto-executed before the loop
+
+MAX_TOOL_CALLS = 6
 
 if DEFAULT_LLM_TIER not in LLM_MODELS:
     DEFAULT_LLM_TIER = "pro"
@@ -214,6 +263,37 @@ def execute_search(query: str, top_k: int = 5, project_id: str | None = None) ->
         "context": "\n\n---\n\n".join(context_parts),
         "metas": metas,
     }
+
+
+def execute_list_documents(project_id: str | None) -> dict:
+    """Return list of files in the knowledge base with chunk counts."""
+    if project_id:
+        proj = load_project(project_id)
+        if proj:
+            files = [
+                {"filename": f["filename"], "chunks": f.get("chunks", 0)}
+                for f in proj.get("files", [])
+            ]
+            return {
+                "files": files,
+                "total_files": len(files),
+                "total_chunks": sum(f["chunks"] for f in files),
+            }
+    # Global scope: derive from ChromaDB metadata
+    try:
+        result = collection.get(include=["metadatas"])
+        counts: dict[str, int] = {}
+        for m in result.get("metadatas", []):
+            src = m.get("source", "unknown")
+            counts[src] = counts.get(src, 0) + 1
+        files = [{"filename": src, "chunks": n} for src, n in sorted(counts.items())]
+        return {
+            "files": files,
+            "total_files": len(files),
+            "total_chunks": sum(f["chunks"] for f in files),
+        }
+    except Exception as e:
+        return {"files": [], "total_files": 0, "total_chunks": 0, "error": str(e)}
 
 
 def load_chat_session(session_id: str) -> dict | None:
@@ -654,13 +734,40 @@ def chat_stream(body: ChatRequest):
         seen_sources:      set  = set()
         collected_context: list = []   # context blocks from all searches
         usage = None
+        kb_context = ""  # injected into both phase-1 and phase-2 system prompts
 
         yield send({"type": "step", "message": "AI đang phân tích câu hỏi..."})
 
         # ── Phase 1: Agentic tool-use loop ─────────────────────────────────────
         if has_docs:
+            # Auto-list documents and inject into system prompt so the model
+            # always knows what files exist (no LLM call wasted on listing).
+            doc_list = execute_list_documents(project_id)
+            if doc_list["files"]:
+                file_lines = "\n".join(
+                    f"- {f['filename']} ({f['chunks']} chunks)"
+                    for f in doc_list["files"]
+                )
+                kb_context = (
+                    f"\n\n## Knowledge base "
+                    f"({doc_list['total_files']} files · {doc_list['total_chunks']} chunks total)\n"
+                    f"{file_lines}"
+                )
+            else:
+                kb_context = "\n\n## Knowledge base\nNo documents found."
+
+            yield send({
+                "type": "tool_call",
+                "tool": "list_documents",
+                "query": "Liệt kê tài liệu trong knowledge base",
+            })
+            yield send({
+                "type": "activity",
+                "message": f"Tìm thấy {doc_list['total_files']} tài liệu — bắt đầu lên kế hoạch tìm kiếm...",
+            })
+
             tool_messages = (
-                [{"role": "system", "content": AGENTIC_SYSTEM_PROMPT}]
+                [{"role": "system", "content": AGENTIC_SYSTEM_PROMPT + kb_context}]
                 + tool_history
                 + [{"role": "user", "content": message}]
             )
@@ -670,7 +777,7 @@ def chat_stream(body: ChatRequest):
                 yield send({
                     "type": "activity",
                     "message": (
-                        "AI đang chọn truy vấn tìm kiếm..."
+                        "AI đang lên kế hoạch tìm kiếm..."
                         if tool_call_count == 0
                         else "AI đang đọc kết quả và cân nhắc có cần tìm thêm..."
                     ),
@@ -679,7 +786,7 @@ def chat_stream(body: ChatRequest):
                     stream = llm_client.chat.completions.create(
                         model=llm_model,
                         messages=tool_messages,
-                        tools=[SEARCH_TOOL],
+                        tools=AGENT_TOOLS,
                         tool_choice="auto",
                         stream=True,
                         extra_body={"thinking": {"type": "enabled"}},
@@ -754,44 +861,68 @@ def chat_stream(body: ChatRequest):
                 for tc in tool_call_acc.values():
                     tool_call_count += 1
 
-                    if tc["name"] != "search_documents":
+                    # ── list_documents ────────────────────────────────────────
+                    if tc["name"] == "list_documents":
+                        yield send({"type": "tool_call", "tool": "list_documents", "query": "Liệt kê tài liệu trong knowledge base"})
+                        doc_list = execute_list_documents(project_id)
+                        files = doc_list["files"]
+                        if files:
+                            lines = "\n".join(
+                                f"- {f['filename']} ({f['chunks']} chunks)"
+                                for f in files
+                            )
+                            tool_content = (
+                                f"Knowledge base contains {doc_list['total_files']} file(s), "
+                                f"{doc_list['total_chunks']} total chunks:\n{lines}"
+                            )
+                            yield send({
+                                "type": "activity",
+                                "message": f"Tìm thấy {doc_list['total_files']} tài liệu trong knowledge base",
+                            })
+                        else:
+                            tool_content = "No documents found in the knowledge base."
+                            yield send({"type": "activity", "message": "Knowledge base trống"})
                         tool_messages.append({
-                            "role": "tool", "tool_call_id": tc["id"], "content": "Unknown tool.",
+                            "role": "tool", "tool_call_id": tc["id"], "content": tool_content,
                         })
                         continue
 
-                    try:
-                        args  = _json.loads(tc["arguments"])
-                        query = args.get("query", "").strip()
-                        top_k = int(args.get("top_k", 5))
-                    except Exception:
-                        query, top_k = "", 5
+                    # ── search_documents ──────────────────────────────────────
+                    if tc["name"] == "search_documents":
+                        try:
+                            args  = _json.loads(tc["arguments"])
+                            query = args.get("query", "").strip()
+                            top_k = int(args.get("top_k", 5))
+                        except Exception:
+                            query, top_k = "", 5
 
-                    yield send({"type": "tool_call", "query": query})
+                        yield send({"type": "tool_call", "tool": "search_documents", "query": query})
 
-                    if query:
-                        yield send({"type": "activity", "message": "Đang mã hóa truy vấn và tìm trong vector database..."})
-                        result = execute_search(query, top_k, project_id)
-                        yield send({"type": "chunks", "chunks": result["chunks"], "query": query})
-                        yield send({
-                            "type": "activity",
-                            "message": f"Đã tìm thấy {len(result['chunks'])} đoạn, đang đưa vào ngữ cảnh...",
+                        if query:
+                            yield send({"type": "activity", "message": "Đang mã hóa truy vấn và tìm trong vector database..."})
+                            result = execute_search(query, top_k, project_id)
+                            yield send({"type": "chunks", "chunks": result["chunks"], "query": query})
+
+                            for m in result["metas"]:
+                                key = (m["source"], m["chunk_index"])
+                                if key not in seen_sources:
+                                    seen_sources.add(key)
+                                    all_sources.append({"source": m["source"], "chunk_index": m["chunk_index"]})
+
+                            if not result["error"]:
+                                collected_context.append(result["context"])
+                            tool_content = result["context"] if not result["error"] else f"Search error: {result['error']}"
+                        else:
+                            tool_content = "Error: empty query provided."
+
+                        tool_messages.append({
+                            "role": "tool", "tool_call_id": tc["id"], "content": tool_content,
                         })
+                        continue
 
-                        for m in result["metas"]:
-                            key = (m["source"], m["chunk_index"])
-                            if key not in seen_sources:
-                                seen_sources.add(key)
-                                all_sources.append({"source": m["source"], "chunk_index": m["chunk_index"]})
-
-                        if not result["error"]:
-                            collected_context.append(result["context"])
-                        tool_content = result["context"] if not result["error"] else f"Search error: {result['error']}"
-                    else:
-                        tool_content = "Error: empty query provided."
-
+                    # ── unknown tool ──────────────────────────────────────────
                     tool_messages.append({
-                        "role": "tool", "tool_call_id": tc["id"], "content": tool_content,
+                        "role": "tool", "tool_call_id": tc["id"], "content": "Unknown tool.",
                     })
 
                 yield send({"type": "step", "message": "Đang phân tích kết quả tìm kiếm..."})
@@ -807,7 +938,7 @@ def chat_stream(body: ChatRequest):
             synthesis_user_content = message
 
         synthesis_messages = (
-            [{"role": "system", "content": CHAT_SYSTEM_PROMPT}]
+            [{"role": "system", "content": CHAT_SYSTEM_PROMPT + kb_context}]
             + thinking_history
             + [{"role": "user", "content": synthesis_user_content}]
         )

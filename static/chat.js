@@ -314,12 +314,13 @@ async function sendMessage() {
   let thinkingText = '';
 
   // search trace state
-  let traceEl         = null;
-  let traceStatusEl   = null;
-  let traceDetailEl   = null;
-  let traceQueryCount = 0;
-  let traceChunkCount = 0;
-  let lastQueryRowEl  = null;
+  let traceEl          = null;
+  let traceStatusEl    = null;
+  let traceDetailEl    = null;
+  let traceQueryCount  = 0;
+  let traceChunkCount  = 0;
+  let lastQueryRowEl   = null;
+  let lastQueryGroupEl = null;
 
   // response accumulator for markdown rendering
   let responseText = '';
@@ -414,30 +415,61 @@ async function sendMessage() {
 
           case 'tool_call': {
             ensureTrace();
-            traceQueryCount++;
             traceDetailEl.classList.remove('hidden');
             traceEl.querySelector('.trace-toggle').textContent = '▲';
+            const isListTool = event.tool === 'list_documents';
+            if (!isListTool) traceQueryCount++;
+            const qGroup = document.createElement('div');
+            qGroup.className = 'trace-query-group';
             const qRow = document.createElement('div');
-            qRow.className = 'trace-query-row';
+            qRow.className = 'trace-query-row' + (isListTool ? ' trace-list-row' : '');
             qRow.innerHTML =
-              `<span class="trace-q-icon">🔍</span>` +
+              `<span class="trace-q-icon">${isListTool ? '📋' : '🔍'}</span>` +
               `<span class="trace-q-text">${esc(event.query)}</span>` +
-              `<span class="trace-q-count"></span>`;
-            traceDetailEl.appendChild(qRow);
-            lastQueryRowEl = qRow;
-            if (statusEl.parentNode) statusText.textContent = `Đang tìm kiếm...`;
+              (isListTool ? '' : `<span class="trace-q-count"></span><span class="trace-q-toggle" style="display:none">▶</span>`);
+            qGroup.appendChild(qRow);
+            traceDetailEl.appendChild(qGroup);
+            lastQueryRowEl   = isListTool ? null : qRow;
+            lastQueryGroupEl = isListTool ? null : qGroup;
+            if (statusEl.parentNode) statusText.textContent = isListTool ? 'Đang lấy danh sách tài liệu...' : 'Đang tìm kiếm...';
             scrollBottom();
             break;
           }
 
-          case 'chunks':
-            if (lastQueryRowEl) {
+          case 'chunks': {
+            if (lastQueryRowEl && lastQueryGroupEl && event.chunks?.length) {
               traceChunkCount += event.chunks.length;
               lastQueryRowEl.querySelector('.trace-q-count').textContent =
                 `${event.chunks.length} đoạn`;
+
+              const toggleBtn = lastQueryRowEl.querySelector('.trace-q-toggle');
+              toggleBtn.style.display = '';
+
+              const chunkList = document.createElement('div');
+              chunkList.className = 'trace-chunk-list hidden';
+              event.chunks.forEach(c => {
+                const cr = document.createElement('div');
+                cr.className = 'trace-chunk-row';
+                cr.innerHTML =
+                  `<div class="trace-chunk-meta">` +
+                    `<span class="tck-src">${esc(c.source)}</span>` +
+                    `<span class="tck-idx">chunk ${c.chunk_index}</span>` +
+                    `<span class="tck-score">${(c.score * 100).toFixed(1)}%</span>` +
+                  `</div>` +
+                  `<div class="trace-chunk-preview">${esc(c.preview)}</div>`;
+                chunkList.appendChild(cr);
+              });
+              lastQueryGroupEl.appendChild(chunkList);
+
+              lastQueryRowEl.style.cursor = 'pointer';
+              lastQueryRowEl.addEventListener('click', () => {
+                chunkList.classList.toggle('hidden');
+                toggleBtn.textContent = chunkList.classList.contains('hidden') ? '▶' : '▼';
+              });
             }
             scrollBottom();
             break;
+          }
 
           case 'thinking_start':
             thinkingEl = buildThinkingEl('', true);

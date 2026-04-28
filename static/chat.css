@@ -539,6 +539,78 @@ body {
   border-radius: 3px;
 }
 
+.trace-q-toggle {
+  flex-shrink: 0;
+  font-size: 0.6rem;
+  color: #bbb;
+  margin-left: 0.1rem;
+  transition: color 0.1s;
+}
+
+.trace-query-row:hover .trace-q-toggle { color: #888; }
+
+.trace-list-row .trace-q-text { color: #6a7280; font-style: normal; }
+
+/* ── Chunk list nested under query row ───────────────────────────────────── */
+.trace-query-group { display: flex; flex-direction: column; }
+
+.trace-chunk-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.25rem 0.4rem 0.3rem 1.3rem;
+  border-left: 2px solid #e8ecf5;
+  margin: 0.1rem 0 0.25rem 0.55rem;
+}
+
+.trace-chunk-list.hidden { display: none; }
+
+.trace-chunk-row {
+  border: 1px solid #e8ecf5;
+  border-radius: 5px;
+  padding: 0.32rem 0.5rem;
+  background: #fafbfc;
+}
+
+.trace-chunk-meta {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  margin-bottom: 0.15rem;
+  font-size: 0.71rem;
+}
+
+.tck-src {
+  font-weight: 600;
+  color: #2a4ab5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+}
+
+.tck-idx { color: #aaa; flex-shrink: 0; }
+
+.tck-score {
+  margin-left: auto;
+  flex-shrink: 0;
+  background: #eafaf1;
+  color: #1a7a42;
+  font-weight: 600;
+  padding: 0.02rem 0.28rem;
+  border-radius: 3px;
+}
+
+.trace-chunk-preview {
+  color: #555;
+  font-size: 0.73rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 72px;
+  overflow-y: auto;
+}
+
 /* ── Context bar ─────────────────────────────────────────────────────────── */
 .ctx-bar {
   padding: 0.45rem 1.25rem 0.3rem;
