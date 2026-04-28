@@ -410,24 +410,47 @@ body {
 /* ── Sources ─────────────────────────────────────────────────────────────── */
 .msg-sources {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.3rem;
+  flex-direction: column;
+  gap: 0.45rem;
   padding: 0 0.1rem;
+}
+
+.source-group {
+  background: #f0f4ff;
+  border: 1px solid #d0dbf5;
+  border-radius: 8px;
+  padding: 0.45rem 0.55rem;
+  max-width: min(100%, 560px);
+}
+
+.source-file {
+  min-width: 0;
+  font-size: 0.73rem;
+  font-weight: 650;
+  color: #2a4ab5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.source-chunks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-top: 0.35rem;
 }
 
 .source-chip {
   display: inline-flex;
   align-items: center;
-  gap: 0.25rem;
-  background: #f0f4ff;
-  border: 1px solid #d0dbf5;
-  border-radius: 20px;
-  padding: 0.15rem 0.55rem;
-  font-size: 0.73rem;
-  color: #2a4ab5;
+  border: 1px solid #d9e2f8;
+  border-radius: 999px;
+  background: #fff;
+  padding: 0.08rem 0.42rem;
+  font-size: 0.69rem;
+  line-height: 1.35;
+  color: #65708a;
 }
-
-.source-chip .src-idx { color: #999; }
 
 @keyframes activity-pulse {
   0%, 100% { opacity: 0.35; transform: scale(0.85); }

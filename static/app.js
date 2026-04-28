@@ -332,11 +332,12 @@ function renderLiveChunks(chunks) {
 function renderSources(sources) {
   sourcesList.innerHTML = '';
   if (sources && sources.length > 0) {
-    sources.forEach(({ source, chunk_index }) => {
+    groupSources(sources).forEach(({ source, chunks }) => {
       const li = document.createElement('li');
+      li.title = source;
       li.innerHTML =
-        `<span class="src-file">${escapeHtml(source)}</span>` +
-        `<span class="src-chunk">chunk ${chunk_index}</span>`;
+        `<span class="src-file">${escapeHtml(compactFileName(source))}</span>` +
+        `<span class="src-chunks">${chunks.map(chunk => `<span class="src-chunk">#${chunk}</span>`).join('')}</span>`;
       sourcesList.appendChild(li);
     });
   } else {
@@ -346,6 +347,34 @@ function renderSources(sources) {
   }
 }
 
+function groupSources(sources = []) {
+  const groups = new Map();
+
+  sources.forEach(({ source, chunk_index }) => {
+    const name = source || 'Unknown source';
+    if (!groups.has(name)) groups.set(name, new Set());
+    groups.get(name).add(chunk_index);
+  });
+
+  return Array.from(groups, ([source, chunkSet]) => ({
+    source,
+    chunks: Array.from(chunkSet).sort((a, b) => Number(a) - Number(b)),
+  }));
+}
+
+function compactFileName(name, max = 62) {
+  const text = String(name || 'Unknown source');
+  if (text.length <= max) return text;
+
+  const dot = text.lastIndexOf('.');
+  const ext = dot > 0 && text.length - dot <= 8 ? text.slice(dot) : '';
+  const base = ext ? text.slice(0, dot) : text;
+  const head = Math.max(22, Math.floor((max - ext.length - 3) * 0.62));
+  const tail = Math.max(12, max - ext.length - 3 - head);
+
+  return `${base.slice(0, head)}...${base.slice(-tail)}${ext}`;
+}
+
 function escapeHtml(str) {
-  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }

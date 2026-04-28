@@ -229,12 +229,58 @@ function buildThinkingEl(initialText, active) {
 function appendSources(bodyEl, sources) {
   const sourcesEl = bodyEl.querySelector('.msg-sources');
   sourcesEl.style.display = 'flex';
-  sources.forEach(({ source, chunk_index }) => {
-    const chip = document.createElement('span');
-    chip.className = 'source-chip';
-    chip.innerHTML = `${esc(source)} <span class="src-idx">#${chunk_index}</span>`;
-    sourcesEl.appendChild(chip);
+  sourcesEl.innerHTML = '';
+
+  groupSources(sources).forEach(({ source, chunks }) => {
+    const group = document.createElement('div');
+    group.className = 'source-group';
+    group.title = source;
+
+    const file = document.createElement('div');
+    file.className = 'source-file';
+    file.textContent = compactFileName(source);
+
+    const chunkList = document.createElement('div');
+    chunkList.className = 'source-chunks';
+    chunks.forEach(chunkIndex => {
+      const chip = document.createElement('span');
+      chip.className = 'source-chip';
+      chip.textContent = `#${chunkIndex}`;
+      chunkList.appendChild(chip);
+    });
+
+    group.appendChild(file);
+    group.appendChild(chunkList);
+    sourcesEl.appendChild(group);
   });
+}
+
+function groupSources(sources = []) {
+  const groups = new Map();
+
+  sources.forEach(({ source, chunk_index }) => {
+    const name = source || 'Unknown source';
+    if (!groups.has(name)) groups.set(name, new Set());
+    groups.get(name).add(chunk_index);
+  });
+
+  return Array.from(groups, ([source, chunkSet]) => ({
+    source,
+    chunks: Array.from(chunkSet).sort((a, b) => Number(a) - Number(b)),
+  }));
+}
+
+function compactFileName(name, max = 54) {
+  const text = String(name || 'Unknown source');
+  if (text.length <= max) return text;
+
+  const dot = text.lastIndexOf('.');
+  const ext = dot > 0 && text.length - dot <= 8 ? text.slice(dot) : '';
+  const base = ext ? text.slice(0, dot) : text;
+  const head = Math.max(18, Math.floor((max - ext.length - 3) * 0.62));
+  const tail = Math.max(10, max - ext.length - 3 - head);
+
+  return `${base.slice(0, head)}...${base.slice(-tail)}${ext}`;
 }
 
 // ── Markdown renderer ─────────────────────────────────────────────────────────
