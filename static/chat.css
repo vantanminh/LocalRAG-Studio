@@ -347,6 +347,35 @@ body {
 
 .source-chip .src-idx { color: #999; }
 
+/* ── Streaming activity ──────────────────────────────────────────────────── */
+.msg-activity {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.25rem 0.1rem;
+  color: #6a7280;
+  font-size: 0.77rem;
+  line-height: 1.35;
+}
+
+.activity-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #6c8cff;
+  flex-shrink: 0;
+  animation: activity-pulse 1.2s ease-in-out infinite;
+}
+
+.activity-text {
+  overflow-wrap: anywhere;
+}
+
+@keyframes activity-pulse {
+  0%, 100% { opacity: 0.35; transform: scale(0.85); }
+  50%      { opacity: 1; transform: scale(1); }
+}
+
 /* ── Agentic search step ─────────────────────────────────────────────────── */
 .msg-search-step {
   border: 1px solid #d0dbf5;

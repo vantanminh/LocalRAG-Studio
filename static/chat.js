@@ -194,6 +194,15 @@ function buildSearchStepEl(query) {
   return el;
 }
 
+function buildActivityEl(message) {
+  const el = document.createElement('div');
+  el.className = 'msg-activity';
+  el.innerHTML =
+    `<span class="activity-dot"></span>` +
+    `<span class="activity-text">${esc(message)}</span>`;
+  return el;
+}
+
 function buildChunksEl(chunks) {
   const el = document.createElement('div');
   el.className = 'msg-chunks';
@@ -305,6 +314,12 @@ async function sendMessage() {
 
           case 'step':
             if (statusEl.parentNode) statusText.textContent = event.message;
+            break;
+
+          case 'activity':
+            bodyEl.insertBefore(buildActivityEl(event.message), bubbleEl);
+            if (statusEl.parentNode) statusText.textContent = event.message;
+            scrollBottom();
             break;
 
           case 'tool_call':

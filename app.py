@@ -584,6 +584,14 @@ def chat_stream(body: ChatRequest):
             tool_call_count = 0
 
             while tool_call_count < MAX_TOOL_CALLS:
+                yield send({
+                    "type": "activity",
+                    "message": (
+                        "AI đang chọn truy vấn tìm kiếm..."
+                        if tool_call_count == 0
+                        else "AI đang đọc kết quả và cân nhắc có cần tìm thêm..."
+                    ),
+                })
                 try:
                     stream = llm_client.chat.completions.create(
                         model=LLM_MODEL,
@@ -600,6 +608,13 @@ def chat_stream(body: ChatRequest):
                 tool_call_acc: dict[int, dict] = {}
                 current_content = ""
                 current_reasoning = ""
+                progress_index = 0
+                progress_messages = [
+                    "Đang lập kế hoạch tra cứu...",
+                    "Đang đối chiếu câu hỏi với tài liệu...",
+                    "Đang kiểm tra các nguồn có liên quan...",
+                    "Đang chuẩn bị bước tiếp theo...",
+                ]
 
                 for chunk in stream:
                     if not chunk.choices:
@@ -609,6 +624,10 @@ def chat_stream(body: ChatRequest):
                     reasoning = getattr(delta, "reasoning_content", None) or ""
                     if reasoning:
                         current_reasoning += reasoning
+                        next_index = min(len(current_reasoning) // 700, len(progress_messages) - 1)
+                        if next_index >= progress_index:
+                            yield send({"type": "activity", "message": progress_messages[progress_index]})
+                            progress_index = next_index + 1
 
                     if delta.tool_calls:
                         for tc in delta.tool_calls:
@@ -668,8 +687,13 @@ def chat_stream(body: ChatRequest):
                     yield send({"type": "tool_call", "query": query})
 
                     if query:
+                        yield send({"type": "activity", "message": "Đang mã hóa truy vấn và tìm trong vector database..."})
                         result = execute_search(query, top_k)
                         yield send({"type": "chunks", "chunks": result["chunks"], "query": query})
+                        yield send({
+                            "type": "activity",
+                            "message": f"Đã tìm thấy {len(result['chunks'])} đoạn, đang đưa vào ngữ cảnh...",
+                        })
 
                         for m in result["metas"]:
                             key = (m["source"], m["chunk_index"])
