@@ -1,3 +1,4 @@
+import datetime
 import json as _json
 import os
 import re
@@ -27,11 +28,18 @@ CHUNK_OVERLAP = 200
 TOP_K         = 8
 UPLOAD_DIR    = Path("./uploads")
 CHROMA_DIR    = "./chroma"
+CHATS_DIR     = Path("./chats")
 
 SYSTEM_PROMPT = (
     "You are a RAG assistant. Answer only using the provided context. "
     "If the context does not contain enough information, say that the uploaded documents "
     "do not contain enough information to answer. Do not invent facts."
+)
+
+CHAT_SYSTEM_PROMPT = (
+    "You are a helpful RAG assistant with access to the full conversation history. "
+    "When document context is provided, use it to answer accurately. "
+    "Be conversational and concise. If the context doesn't have enough information, say so honestly."
 )
 
 # ── clients ───────────────────────────────────────────────────────────────────
@@ -116,6 +124,17 @@ def embed_query(query: str) -> list[float]:
     return embed_texts([query])[0]
 
 
+def load_chat_session(session_id: str) -> dict | None:
+    path = CHATS_DIR / f"{session_id}.json"
+    if not path.exists():
+        return None
+    return _json.loads(path.read_text(encoding="utf-8"))
+
+
+def save_chat_session(session: dict):
+    CHATS_DIR.mkdir(exist_ok=True)
+    path = CHATS_DIR / f"{session['id']}.json"
+    path.write_text(_json.dumps(session, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 # ── FastAPI app ───────────────────────────────────────────────────────────────
@@ -127,6 +146,11 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 @app.get("/")
 def root():
     return FileResponse("static/index.html")
+
+
+@app.get("/chat")
+def chat_page():
+    return FileResponse("static/chat.html")
 
 
 # ── /upload ───────────────────────────────────────────────────────────────────
@@ -366,6 +390,185 @@ def ask_stream(body: AskRequest):
                 sources.append({"source": m["source"], "chunk_index": m["chunk_index"]})
 
         yield send({"type": "done", "sources": sources})
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+# ── /chat/sessions ────────────────────────────────────────────────────────────
+
+@app.get("/chat/sessions")
+def list_chat_sessions():
+    CHATS_DIR.mkdir(exist_ok=True)
+    sessions = []
+    for f in sorted(CHATS_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+        try:
+            data = _json.loads(f.read_text(encoding="utf-8"))
+            sessions.append({
+                "id": data["id"],
+                "title": data.get("title", "Untitled"),
+                "created_at": data.get("created_at"),
+                "message_count": len(data.get("messages", [])),
+            })
+        except Exception:
+            pass
+    return {"sessions": sessions}
+
+
+@app.get("/chat/sessions/{session_id}")
+def get_chat_session(session_id: str):
+    session = load_chat_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found.")
+    return session
+
+
+@app.delete("/chat/sessions/{session_id}")
+def delete_chat_session(session_id: str):
+    path = CHATS_DIR / f"{session_id}.json"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Session not found.")
+    path.unlink()
+    return {"ok": True}
+
+
+# ── /chat/stream ──────────────────────────────────────────────────────────────
+
+class ChatRequest(BaseModel):
+    session_id: str | None = None
+    message: str
+
+
+@app.post("/chat/stream")
+def chat_stream(body: ChatRequest):
+    message = body.message.strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="Message must not be empty.")
+
+    session_id = body.session_id
+    session = load_chat_session(session_id) if session_id else None
+    if not session:
+        session_id = uuid.uuid4().hex
+        session = {
+            "id": session_id,
+            "title": message[:60],
+            "created_at": datetime.datetime.now().isoformat(),
+            "messages": [],
+        }
+
+    def event_stream():
+        def send(obj: dict) -> str:
+            return f"data: {_json.dumps(obj, ensure_ascii=False)}\n\n"
+
+        yield send({"type": "session", "session_id": session_id})
+
+        # RAG retrieval (skip if no docs)
+        sources: list = []
+        if collection.count() > 0:
+            yield send({"type": "step", "message": "Đang tìm kiếm tài liệu liên quan..."})
+            try:
+                q_embedding = embed_query(message)
+            except Exception as e:
+                yield send({"type": "error", "message": f"Embedding error: {e}"})
+                return
+
+            results = collection.query(
+                query_embeddings=[q_embedding],
+                n_results=min(TOP_K, collection.count()),
+                include=["documents", "metadatas", "distances"],
+            )
+            docs = results["documents"][0]
+            metas = results["metadatas"][0]
+            distances = results["distances"][0]
+
+            yield send({"type": "step", "message": f"Tìm thấy {len(docs)} đoạn văn liên quan"})
+
+            chunks_data = [
+                {
+                    "source": m["source"],
+                    "chunk_index": m["chunk_index"],
+                    "preview": d[:400] + ("…" if len(d) > 400 else ""),
+                    "score": round(1 - distances[i], 3),
+                }
+                for i, (d, m) in enumerate(zip(docs, metas))
+            ]
+            yield send({"type": "chunks", "chunks": chunks_data})
+
+            context_parts = [
+                f"[Source: {m['source']}, chunk {m['chunk_index']}]\n{d}"
+                for d, m in zip(docs, metas)
+            ]
+            user_content = f"[Document context]\n{chr(10).join(context_parts)}\n\n[Question]\n{message}"
+
+            seen_src: set = set()
+            for m in metas:
+                key = (m["source"], m["chunk_index"])
+                if key not in seen_src:
+                    seen_src.add(key)
+                    sources.append({"source": m["source"], "chunk_index": m["chunk_index"]})
+        else:
+            user_content = message
+
+        # Build multi-turn messages
+        history = [{"role": m["role"], "content": m["content"]} for m in session["messages"]]
+        messages_to_send = (
+            [{"role": "system", "content": CHAT_SYSTEM_PROMPT}]
+            + history
+            + [{"role": "user", "content": user_content}]
+        )
+
+        yield send({"type": "step", "message": "Đang tạo câu trả lời..."})
+
+        full_answer = ""
+        full_thinking = ""
+
+        try:
+            stream = llm_client.chat.completions.create(
+                model=LLM_MODEL,
+                messages=messages_to_send,
+                stream=True,
+                extra_body={"thinking": {"type": "enabled"}},
+            )
+            thinking_started = False
+            answering_started = False
+            for chunk in stream:
+                delta = chunk.choices[0].delta
+                reasoning = getattr(delta, "reasoning_content", None) or ""
+                content = delta.content or ""
+                if reasoning:
+                    full_thinking += reasoning
+                    if not thinking_started:
+                        thinking_started = True
+                        yield send({"type": "thinking_start"})
+                        yield send({"type": "step", "message": "Đang suy nghĩ..."})
+                    yield send({"type": "thinking_token", "content": reasoning})
+                if content:
+                    full_answer += content
+                    if not answering_started:
+                        answering_started = True
+                        if thinking_started:
+                            yield send({"type": "thinking_end"})
+                        yield send({"type": "step", "message": "Đang viết câu trả lời..."})
+                    yield send({"type": "token", "content": content})
+        except Exception as e:
+            yield send({"type": "error", "message": f"LLM error: {e}"})
+            return
+
+        now = datetime.datetime.now().isoformat()
+        session["messages"].append({"role": "user", "content": message, "timestamp": now})
+        session["messages"].append({
+            "role": "assistant",
+            "content": full_answer,
+            "thinking": full_thinking,
+            "sources": sources,
+            "timestamp": now,
+        })
+        save_chat_session(session)
+
+        yield send({"type": "done", "sources": sources, "session_id": session_id})
 
     return StreamingResponse(
         event_stream(),

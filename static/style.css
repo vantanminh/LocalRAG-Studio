@@ -36,6 +36,21 @@ header h1 {
   font-size: 0.95rem;
 }
 
+.chat-link {
+  display: inline-block;
+  margin-top: 0.6rem;
+  padding: 0.35rem 1rem;
+  background: #4a7efa;
+  color: #fff;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background 0.15s;
+}
+
+.chat-link:hover { background: #2f5ed6; }
+
 /* Card */
 .card {
   background: #fff;
