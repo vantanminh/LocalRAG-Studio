@@ -214,6 +214,24 @@ def save_chat_session(session: dict):
     path.write_text(_json.dumps(session, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def build_chat_histories(session: dict) -> tuple[list[dict], list[dict]]:
+    tool_history = []
+    thinking_history = []
+
+    for m in session.get("messages", []):
+        msg: dict = {"role": m["role"], "content": m["content"]}
+        tool_history.append(msg)
+
+        thinking_msg = dict(msg)
+        if m["role"] == "assistant":
+            reasoning_content = m.get("reasoning_content") or m.get("thinking")
+            if reasoning_content:
+                thinking_msg["reasoning_content"] = reasoning_content
+        thinking_history.append(thinking_msg)
+
+    return tool_history, thinking_history
+
+
 # ── FastAPI app ───────────────────────────────────────────────────────────────
 
 app = FastAPI(title="RAG Local")
@@ -547,18 +565,7 @@ def chat_stream(body: ChatRequest):
         # Keep two histories:
         # - tool_history is plain OpenAI chat history for the non-thinking tool loop.
         # - thinking_history includes DeepSeek reasoning_content for thinking-mode turns.
-        tool_history = []
-        thinking_history = []
-        for m in session["messages"]:
-            msg: dict = {"role": m["role"], "content": m["content"]}
-            tool_history.append(msg)
-
-            thinking_msg = dict(msg)
-            if m["role"] == "assistant":
-                reasoning_content = m.get("reasoning_content") or m.get("thinking")
-                if reasoning_content:
-                    thinking_msg["reasoning_content"] = reasoning_content
-            thinking_history.append(thinking_msg)
+        tool_history, thinking_history = build_chat_histories(session)
 
         all_sources:       list = []
         seen_sources:      set  = set()
