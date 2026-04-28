@@ -312,3 +312,249 @@ textarea:focus {
 .sources-list li .src-chunk {
   color: #888;
 }
+
+/* ── Live View ─────────────────────────────────────────────────────────────── */
+
+.live-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+}
+
+.step-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.step-icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.step-icon.step-pending {
+  background: #e2e6ed;
+}
+
+.step-icon.step-active {
+  border: 2px solid #a0b5f0;
+  border-top-color: #4a7efa;
+  animation: spin 0.7s linear infinite;
+}
+
+.step-icon.step-done {
+  background: #27ae60;
+}
+
+.step-icon.step-done::after {
+  content: '';
+  position: absolute;
+  top: 4px;
+  left: 6px;
+  width: 5px;
+  height: 9px;
+  border: 2px solid #fff;
+  border-top: none;
+  border-left: none;
+  transform: rotate(45deg);
+}
+
+.step-icon.step-error {
+  background: #e74c3c;
+}
+
+.step-icon.step-error::after {
+  content: '×';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 20px;
+  text-align: center;
+}
+
+.step-info {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.step-label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #1a1a2e;
+}
+
+.step-msg {
+  font-size: 0.8rem;
+  color: #666;
+}
+
+/* Thinking panel */
+.live-thinking {
+  margin-top: 0.5rem;
+  border: 1px solid #f0d080;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.thinking-toggle {
+  background: #fefaed !important;
+  color: #7a5a00 !important;
+  border-bottom: 1px solid #f0d080;
+}
+
+.thinking-toggle:hover {
+  background: #fdf4d0 !important;
+}
+
+.thinking-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ccc;
+  flex-shrink: 0;
+  transition: background 0.2s;
+}
+
+.thinking-pulse.active {
+  background: #f0a500;
+  animation: pulse 1s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.5; transform: scale(0.8); }
+}
+
+.thinking-body {
+  font-size: 0.78rem;
+  font-family: monospace;
+  color: #6b5700;
+  background: #fffdf0;
+  padding: 0.75rem;
+  max-height: 260px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.55;
+}
+
+.thinking-body.hidden {
+  display: none;
+}
+
+/* Chunks panel */
+.live-chunks {
+  margin-top: 0.5rem;
+  border: 1px solid #e2e6ed;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.chunks-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 0.9rem;
+  background: #f5f7ff;
+  border: none;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #2a4ab5;
+  text-align: left;
+  transition: background 0.15s;
+}
+
+.chunks-toggle:hover {
+  background: #eaeffb;
+}
+
+.toggle-arrow {
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: #888;
+}
+
+.chunks-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  background: #fff;
+  max-height: 340px;
+  overflow-y: auto;
+}
+
+.chunks-body.hidden {
+  display: none;
+}
+
+.chunk-card {
+  border: 1px solid #e2e6ed;
+  border-radius: 6px;
+  padding: 0.6rem 0.75rem;
+  background: #fafbfc;
+}
+
+.chunk-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.chunk-source {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #2a4ab5;
+}
+
+.chunk-idx {
+  font-size: 0.75rem;
+  color: #888;
+}
+
+.chunk-score {
+  margin-left: auto;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #27ae60;
+  background: #eafaf1;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+}
+
+.chunk-preview {
+  font-size: 0.8rem;
+  color: #444;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Streaming cursor */
+.answer-box.streaming::after {
+  content: '▋';
+  display: inline-block;
+  animation: blink 0.8s step-end infinite;
+  color: #4a7efa;
+  margin-left: 1px;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}

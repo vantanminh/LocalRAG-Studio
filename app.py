@@ -1,3 +1,4 @@
+import json as _json
 import os
 import re
 import uuid
@@ -5,7 +6,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -259,3 +260,115 @@ def ask_question(body: AskRequest):
             sources.append({"source": m["source"], "chunk_index": m["chunk_index"]})
 
     return {"answer": answer, "sources": sources}
+
+
+# ── /ask/stream ───────────────────────────────────────────────────────────────
+
+@app.post("/ask/stream")
+def ask_stream(body: AskRequest):
+    question = body.question.strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="Question must not be empty.")
+    if collection.count() == 0:
+        raise HTTPException(status_code=400, detail="No documents have been indexed yet.")
+
+    def event_stream():
+        def send(obj: dict) -> str:
+            return f"data: {_json.dumps(obj, ensure_ascii=False)}\n\n"
+
+        # Step 1: Embedding
+        yield send({"type": "step", "step": "embedding", "status": "active", "message": "Đang mã hóa câu hỏi..."})
+        try:
+            q_embedding = embed_query(question)
+        except Exception as e:
+            yield send({"type": "error", "message": f"Embedding error: {e}"})
+            return
+        yield send({"type": "step", "step": "embedding", "status": "done", "message": "Mã hóa hoàn tất"})
+
+        # Step 2: Retrieval
+        yield send({"type": "step", "step": "retrieval", "status": "active", "message": "Đang tìm kiếm trong vector database..."})
+        results = collection.query(
+            query_embeddings=[q_embedding],
+            n_results=min(TOP_K, collection.count()),
+            include=["documents", "metadatas", "distances"],
+        )
+        docs = results["documents"][0]
+        metas = results["metadatas"][0]
+        distances = results["distances"][0]
+
+        if not docs:
+            yield send({"type": "error", "message": "Không tìm thấy đoạn văn liên quan."})
+            return
+
+        yield send({"type": "step", "step": "retrieval", "status": "done", "message": f"Tìm thấy {len(docs)} đoạn văn liên quan"})
+
+        chunks_data = [
+            {
+                "source": m["source"],
+                "chunk_index": m["chunk_index"],
+                "preview": d[:400] + ("…" if len(d) > 400 else ""),
+                "score": round(1 - distances[i], 3),
+            }
+            for i, (d, m) in enumerate(zip(docs, metas))
+        ]
+        yield send({"type": "chunks", "chunks": chunks_data})
+
+        # Step 3: Generating
+        yield send({"type": "step", "step": "generating", "status": "active", "message": "Đang tạo câu trả lời..."})
+
+        context_parts = [
+            f"[Source: {m['source']}, chunk {m['chunk_index']}]\n{d}"
+            for d, m in zip(docs, metas)
+        ]
+        context_block = "\n\n---\n\n".join(context_parts)
+        user_message = f"Context:\n{context_block}\n\nQuestion: {question}"
+
+        try:
+            stream = llm_client.chat.completions.create(
+                model=LLM_MODEL,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": user_message},
+                ],
+                stream=True,
+                extra_body={"thinking": {"type": "enabled"}},
+            )
+            thinking_started = False
+            answering_started = False
+            for chunk in stream:
+                delta = chunk.choices[0].delta
+                reasoning = getattr(delta, "reasoning_content", None) or ""
+                content = delta.content or ""
+                if reasoning:
+                    if not thinking_started:
+                        thinking_started = True
+                        yield send({"type": "thinking_start"})
+                        yield send({"type": "step", "step": "generating", "status": "active", "message": "Đang suy nghĩ..."})
+                    yield send({"type": "thinking_token", "content": reasoning})
+                if content:
+                    if not answering_started:
+                        answering_started = True
+                        yield send({"type": "thinking_end"})
+                        yield send({"type": "step", "step": "generating", "status": "active", "message": "Đang viết câu trả lời..."})
+                    yield send({"type": "token", "content": content})
+        except Exception as e:
+            yield send({"type": "error", "message": f"LLM error: {e}"})
+            return
+
+        yield send({"type": "step", "step": "generating", "status": "done", "message": "Hoàn tất"})
+
+        seen: set = set()
+        sources = []
+        for m in metas:
+            key = (m["source"], m["chunk_index"])
+            if key not in seen:
+                seen.add(key)
+                sources.append({"source": m["source"], "chunk_index": m["chunk_index"]})
+
+        yield send({"type": "done", "sources": sources})
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

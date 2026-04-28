@@ -74,6 +74,51 @@
       <div id="ask-status" class="status hidden"></div>
     </section>
 
+    <!-- Live View Section -->
+    <section class="card" id="live-section" style="display:none;">
+      <h2>Live Process</h2>
+      <div class="live-steps">
+        <div class="step-item" id="step-embedding">
+          <div class="step-icon step-pending"></div>
+          <div class="step-info">
+            <span class="step-label">Mã hóa câu hỏi</span>
+            <span class="step-msg" id="msg-embedding"></span>
+          </div>
+        </div>
+        <div class="step-item" id="step-retrieval">
+          <div class="step-icon step-pending"></div>
+          <div class="step-info">
+            <span class="step-label">Tìm kiếm tài liệu</span>
+            <span class="step-msg" id="msg-retrieval"></span>
+          </div>
+        </div>
+        <div class="step-item" id="step-generating">
+          <div class="step-icon step-pending"></div>
+          <div class="step-info">
+            <span class="step-label">Tạo câu trả lời</span>
+            <span class="step-msg" id="msg-generating"></span>
+          </div>
+        </div>
+      </div>
+
+      <div id="live-thinking" class="live-thinking" style="display:none;">
+        <button class="chunks-toggle thinking-toggle" id="thinking-toggle">
+          <span class="thinking-pulse" id="thinking-pulse"></span>
+          <span id="thinking-title">Đang suy nghĩ...</span>
+          <span class="toggle-arrow" id="thinking-arrow">▼</span>
+        </button>
+        <div id="thinking-body" class="thinking-body"></div>
+      </div>
+
+      <div id="live-chunks" class="live-chunks" style="display:none;">
+        <button class="chunks-toggle" id="chunks-toggle">
+          <span id="chunks-title">Đoạn văn tìm được</span>
+          <span class="toggle-arrow">▼</span>
+        </button>
+        <div id="chunks-body" class="chunks-body hidden"></div>
+      </div>
+    </section>
+
     <!-- Answer Section -->
     <section class="card" id="answer-section" style="display:none;">
       <h2>Answer</h2>
