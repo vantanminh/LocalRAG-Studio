@@ -300,6 +300,7 @@ async function sendMessage() {
   chatInput.style.height = 'auto';
   isStreaming = true;
   sendBtn.disabled = true;
+  userScrolledUp = false;
 
   appendUserBubble(text);
   const { bodyEl } = appendAssistantBubble();
@@ -577,8 +578,18 @@ function updateCtxBar(usage, contextWindow) {
 ctxNewBtn.addEventListener('click', startNewChat);
 
 // ── Utils ─────────────────────────────────────────────────────────────────────
+// ── Smart scroll ──────────────────────────────────────────────────────────────
+// Only auto-scroll when the user is already near the bottom (within 120px).
+// If they scroll up mid-stream, we stop forcing them down.
+let userScrolledUp = false;
+
+messagesEl.addEventListener('scroll', () => {
+  const distFromBottom = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight;
+  userScrolledUp = distFromBottom > 120;
+}, { passive: true });
+
 function scrollBottom() {
-  messagesEl.scrollTop = messagesEl.scrollHeight;
+  if (!userScrolledUp) messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
 function esc(str) {
