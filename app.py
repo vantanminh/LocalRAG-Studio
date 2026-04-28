@@ -563,7 +563,7 @@ def chat_stream(body: ChatRequest):
         yield send({"type": "session", "session_id": session_id})
 
         # Keep two histories:
-        # - tool_history is plain OpenAI chat history for the non-thinking tool loop.
+        # - tool_history is plain OpenAI chat history for the tool loop.
         # - thinking_history includes DeepSeek reasoning_content for thinking-mode turns.
         tool_history, thinking_history = build_chat_histories(session)
 
@@ -574,7 +574,7 @@ def chat_stream(body: ChatRequest):
 
         yield send({"type": "step", "message": "AI đang phân tích câu hỏi..."})
 
-        # ── Phase 1: Agentic tool-use loop (NO thinking) ───────────────────────
+        # ── Phase 1: Agentic tool-use loop ─────────────────────────────────────
         if has_docs:
             tool_messages = (
                 [{"role": "system", "content": AGENTIC_SYSTEM_PROMPT}]
@@ -591,6 +591,7 @@ def chat_stream(body: ChatRequest):
                         tools=[SEARCH_TOOL],
                         tool_choice="auto",
                         stream=True,
+                        extra_body={"thinking": {"type": "enabled"}},
                     )
                 except Exception as e:
                     yield send({"type": "error", "message": f"LLM error: {e}"})
@@ -598,11 +599,16 @@ def chat_stream(body: ChatRequest):
 
                 tool_call_acc: dict[int, dict] = {}
                 current_content = ""
+                current_reasoning = ""
 
                 for chunk in stream:
                     if not chunk.choices:
                         continue
                     delta = chunk.choices[0].delta
+
+                    reasoning = getattr(delta, "reasoning_content", None) or ""
+                    if reasoning:
+                        current_reasoning += reasoning
 
                     if delta.tool_calls:
                         for tc in delta.tool_calls:
@@ -626,7 +632,7 @@ def chat_stream(body: ChatRequest):
                     break
 
                 # Append assistant turn with tool_calls
-                tool_messages.append({
+                assistant_tool_message = {
                     "role":    "assistant",
                     "content": current_content or None,
                     "tool_calls": [
@@ -637,7 +643,10 @@ def chat_stream(body: ChatRequest):
                         }
                         for tc in tool_call_acc.values()
                     ],
-                })
+                }
+                if current_reasoning:
+                    assistant_tool_message["reasoning_content"] = current_reasoning
+                tool_messages.append(assistant_tool_message)
 
                 # Execute tools and collect context
                 for tc in tool_call_acc.values():
