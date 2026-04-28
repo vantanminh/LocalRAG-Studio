@@ -7,6 +7,12 @@ const messagesEl    = document.getElementById('messages');
 const welcomeEl     = document.getElementById('welcome');
 const chatInput     = document.getElementById('chat-input');
 const sendBtn       = document.getElementById('send-btn');
+const ctxBar        = document.getElementById('ctx-bar');
+const ctxTokens     = document.getElementById('ctx-tokens');
+const ctxLimit      = document.getElementById('ctx-limit');
+const ctxPct        = document.getElementById('ctx-pct');
+const ctxFill       = document.getElementById('ctx-fill');
+const ctxNewBtn     = document.getElementById('ctx-new-btn');
 
 // ── State ─────────────────────────────────────────────────────────────────────
 let currentSessionId = null;
@@ -82,6 +88,7 @@ async function loadSession(sessionId) {
     localStorage.setItem('chatSessionId', sessionId);
     renderHistory(data.messages || []);
     setActiveSession(sessionId);
+    if (data.last_usage) updateCtxBar(data.last_usage, data.context_window || 131072);
   } catch {}
 }
 
@@ -93,6 +100,7 @@ function startNewChat() {
   messagesEl.appendChild(welcomeEl);
   welcomeEl.style.display = 'flex';
   setActiveSession(null);
+  ctxBar.style.display = 'none';
 }
 
 // ── Render history ────────────────────────────────────────────────────────────
@@ -335,6 +343,7 @@ async function sendMessage() {
           case 'done':
             bubbleEl.classList.remove('streaming');
             if (event.sources?.length) appendSources(bodyEl, event.sources);
+            if (event.usage) updateCtxBar(event.usage, event.context_window || 131072);
             await refreshSessionList();
             setActiveSession(currentSessionId);
             break;
@@ -373,6 +382,29 @@ chatInput.addEventListener('input', () => {
 
 sendBtn.addEventListener('click', sendMessage);
 newChatBtn.addEventListener('click', startNewChat);
+
+// ── Context bar ───────────────────────────────────────────────────────────────
+function updateCtxBar(usage, contextWindow) {
+  if (!usage) return;
+  const used = usage.total_tokens;
+  const pct  = used / contextWindow * 100;
+  const tier = pct >= 80 ? 'red' : pct >= 60 ? 'yellow' : 'green';
+  const remaining = 100 - pct;
+
+  ctxBar.style.display = 'block';
+  ctxTokens.textContent = used.toLocaleString('vi-VN');
+  ctxLimit.textContent  = Math.round(contextWindow / 1024) + 'K';
+
+  ctxPct.className = `ctx-pct ${tier}`;
+  ctxPct.textContent = `còn ${remaining.toFixed(0)}%`;
+
+  ctxFill.className = `ctx-fill ${tier}`;
+  ctxFill.style.width = Math.min(pct, 100).toFixed(1) + '%';
+
+  ctxNewBtn.style.display = pct >= 80 ? 'inline-block' : 'none';
+}
+
+ctxNewBtn.addEventListener('click', startNewChat);
 
 // ── Utils ─────────────────────────────────────────────────────────────────────
 function scrollBottom() {

@@ -416,6 +416,98 @@ body {
   word-break: break-word;
 }
 
+/* ── Context bar ─────────────────────────────────────────────────────────── */
+.ctx-bar {
+  padding: 0.45rem 1.25rem 0.3rem;
+  background: #fff;
+  border-top: 1px solid #eef0f5;
+  flex-shrink: 0;
+}
+
+.ctx-top {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-bottom: 0.3rem;
+  flex-wrap: wrap;
+}
+
+.ctx-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #aaa;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-right: 0.15rem;
+}
+
+.ctx-tokens {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #1a1a2e;
+  font-variant-numeric: tabular-nums;
+}
+
+.ctx-sep { font-size: 0.75rem; color: #ccc; }
+
+.ctx-limit {
+  font-size: 0.78rem;
+  color: #888;
+  font-variant-numeric: tabular-nums;
+}
+
+.ctx-unit { font-size: 0.72rem; color: #bbb; }
+
+.ctx-pct {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.1rem 0.45rem;
+  border-radius: 20px;
+  margin-left: 0.2rem;
+}
+
+.ctx-pct.green  { background: #eafaf1; color: #1a7a42; }
+.ctx-pct.yellow { background: #fef9e7; color: #9a6d00; }
+.ctx-pct.red    { background: #fff0f0; color: #c0392b; }
+
+.ctx-new-btn {
+  margin-left: auto;
+  background: #e74c3c;
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+  animation: pulse-btn 1.5s ease-in-out infinite;
+}
+
+.ctx-new-btn:hover { background: #c0392b; animation: none; }
+
+@keyframes pulse-btn {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.75; }
+}
+
+.ctx-track {
+  height: 3px;
+  background: #f0f2f5;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.ctx-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.4s ease, background-color 0.4s ease;
+}
+
+.ctx-fill.green  { background: #27ae60; }
+.ctx-fill.yellow { background: #f39c12; }
+.ctx-fill.red    { background: #e74c3c; }
+
 /* ── Input bar ───────────────────────────────────────────────────────────── */
 .input-bar {
   display: flex;

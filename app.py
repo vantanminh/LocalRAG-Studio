@@ -23,12 +23,13 @@ DEEPSEEK_API_KEY    = os.getenv("DEEPSEEK_API_KEY")
 DEEPSEEK_BASE_URL   = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 LLM_MODEL           = os.getenv("LLM_MODEL", "deepseek-chat")
 
-CHUNK_SIZE    = 1200
-CHUNK_OVERLAP = 200
-TOP_K         = 8
-UPLOAD_DIR    = Path("./uploads")
-CHROMA_DIR    = "./chroma"
-CHATS_DIR     = Path("./chats")
+CHUNK_SIZE      = 1200
+CHUNK_OVERLAP   = 200
+TOP_K           = 8
+UPLOAD_DIR      = Path("./uploads")
+CHROMA_DIR      = "./chroma"
+CHATS_DIR       = Path("./chats")
+CONTEXT_WINDOW  = int(os.getenv("CONTEXT_WINDOW", "131072"))  # DeepSeek V4 Pro: 128K
 
 SYSTEM_PROMPT = (
     "You are a RAG assistant. Answer only using the provided context. "
@@ -524,17 +525,27 @@ def chat_stream(body: ChatRequest):
 
         full_answer = ""
         full_thinking = ""
+        usage = None
 
         try:
             stream = llm_client.chat.completions.create(
                 model=LLM_MODEL,
                 messages=messages_to_send,
                 stream=True,
+                stream_options={"include_usage": True},
                 extra_body={"thinking": {"type": "enabled"}},
             )
             thinking_started = False
             answering_started = False
             for chunk in stream:
+                if getattr(chunk, "usage", None):
+                    usage = {
+                        "prompt_tokens": chunk.usage.prompt_tokens,
+                        "completion_tokens": chunk.usage.completion_tokens,
+                        "total_tokens": chunk.usage.total_tokens,
+                    }
+                if not chunk.choices:
+                    continue
                 delta = chunk.choices[0].delta
                 reasoning = getattr(delta, "reasoning_content", None) or ""
                 content = delta.content or ""
@@ -565,10 +576,18 @@ def chat_stream(body: ChatRequest):
             "thinking": full_thinking,
             "sources": sources,
             "timestamp": now,
+            "usage": usage,
         })
+        session["last_usage"] = usage
         save_chat_session(session)
 
-        yield send({"type": "done", "sources": sources, "session_id": session_id})
+        yield send({
+            "type": "done",
+            "sources": sources,
+            "session_id": session_id,
+            "usage": usage,
+            "context_window": CONTEXT_WINDOW,
+        })
 
     return StreamingResponse(
         event_stream(),
