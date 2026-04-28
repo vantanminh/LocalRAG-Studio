@@ -18,17 +18,48 @@ const ctxNewBtn     = document.getElementById('ctx-new-btn');
 let currentSessionId = null;
 let isStreaming       = false;
 
+const urlParams  = new URLSearchParams(window.location.search);
+const projectId  = urlParams.get('project_id') || null;
+const initSession = urlParams.get('session_id') || null;
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 async function init() {
+  if (projectId) showProjectBanner();
   await refreshSessionList();
-  const saved = localStorage.getItem('chatSessionId');
-  if (saved) await loadSession(saved);
+  // If a specific session was requested via URL param, load it
+  if (initSession) {
+    await loadSession(initSession);
+  } else if (!projectId) {
+    const saved = localStorage.getItem('chatSessionId');
+    if (saved) await loadSession(saved);
+  }
+}
+
+function showProjectBanner() {
+  const banner = document.getElementById('project-banner');
+  const backLink = document.getElementById('project-back-link');
+  if (!banner) return;
+  banner.style.display = 'flex';
+  if (backLink) {
+    backLink.style.display = 'block';
+    backLink.href = `/p/${projectId}`;
+  }
+  fetch(`/projects/${projectId}`)
+    .then(r => r.ok ? r.json() : null)
+    .then(proj => {
+      if (proj) {
+        banner.querySelector('.banner-name').textContent = proj.name;
+        if (backLink) backLink.textContent = `← ${proj.name}`;
+      }
+    })
+    .catch(() => {});
 }
 
 // ── Session list ──────────────────────────────────────────────────────────────
 async function refreshSessionList() {
   try {
-    const res = await fetch('/chat/sessions');
+    const url = projectId ? `/chat/sessions?project_id=${projectId}` : '/chat/sessions';
+    const res = await fetch(url);
     const data = await res.json();
     renderSessionList(data.sessions || []);
   } catch {}
@@ -85,7 +116,7 @@ async function loadSession(sessionId) {
     if (!res.ok) { startNewChat(); return; }
     const data = await res.json();
     currentSessionId = sessionId;
-    localStorage.setItem('chatSessionId', sessionId);
+    if (!projectId) localStorage.setItem('chatSessionId', sessionId);
     renderHistory(data.messages || []);
     setActiveSession(sessionId);
     if (data.last_usage) updateCtxBar(data.last_usage, data.context_window || 131072);
@@ -95,12 +126,18 @@ async function loadSession(sessionId) {
 // ── New chat ──────────────────────────────────────────────────────────────────
 function startNewChat() {
   currentSessionId = null;
-  localStorage.removeItem('chatSessionId');
+  if (!projectId) localStorage.removeItem('chatSessionId');
   messagesEl.innerHTML = '';
   messagesEl.appendChild(welcomeEl);
   welcomeEl.style.display = 'flex';
   setActiveSession(null);
   ctxBar.style.display = 'none';
+  // Remove session_id from URL without reload
+  if (projectId) {
+    const u = new URL(window.location.href);
+    u.searchParams.delete('session_id');
+    window.history.replaceState({}, '', u.toString());
+  }
 }
 
 // ── Render history ────────────────────────────────────────────────────────────
@@ -277,7 +314,7 @@ async function sendMessage() {
     const res = await fetch('/chat/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id: currentSessionId, message: text }),
+      body: JSON.stringify({ session_id: currentSessionId, message: text, project_id: projectId }),
     });
 
     if (!res.ok) {

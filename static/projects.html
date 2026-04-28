@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Projects – RAG</title>
+  <link rel="stylesheet" href="/static/projects.css" />
+</head>
+<body>
+  <div class="page">
+    <header class="page-header">
+      <h1>📁 Projects</h1>
+      <nav class="nav-links">
+        <a href="/" class="nav-link">RAG Tool</a>
+        <a href="/chat" class="nav-link">💬 Chat</a>
+      </nav>
+    </header>
+
+    <div class="create-form">
+      <input type="text" id="project-name-input" placeholder="Tên project mới…" maxlength="80" />
+      <button class="btn btn-primary" id="create-btn">+ Tạo project</button>
+    </div>
+
+    <div id="project-grid" class="project-grid">
+      <div class="empty-state">Chưa có project nào. Tạo project đầu tiên của bạn!</div>
+    </div>
+  </div>
+
+  <script src="/static/projects.js"></script>
+</body>
+</html>

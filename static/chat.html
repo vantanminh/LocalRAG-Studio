@@ -20,11 +20,19 @@
       </div>
       <div class="sidebar-footer">
         <a href="/" class="back-link">← RAG Tool</a>
+        <a href="/projects-page" class="back-link" style="margin-top:4px;">📁 Projects</a>
+        <a href="#" id="project-back-link" class="back-link" style="display:none; margin-top:4px;">← Project</a>
       </div>
     </aside>
 
     <!-- Main -->
     <main class="chat-main">
+      <!-- Project context banner (shown when ?project_id= is in URL) -->
+      <div id="project-banner" style="display:none; align-items:center; gap:0.6rem; padding:0.55rem 1rem; background:#eef2ff; border-bottom:1px solid #c7d2fe; font-size:0.85rem; flex-shrink:0;">
+        <span>📂</span>
+        <span class="banner-name" style="font-weight:600;"></span>
+        <span style="color:#888;">— chỉ tìm kiếm trong project này</span>
+      </div>
       <div class="messages" id="messages">
         <div class="welcome" id="welcome">
           <div class="welcome-icon">💬</div>

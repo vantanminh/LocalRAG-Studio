@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Project – RAG</title>
+  <link rel="stylesheet" href="/static/projects.css" />
+</head>
+<body>
+  <div class="page">
+    <header class="page-header">
+      <nav class="nav-links">
+        <a href="/projects-page" class="nav-link">← Projects</a>
+        <a href="/" class="nav-link">RAG Tool</a>
+      </nav>
+    </header>
+
+    <!-- Project name row -->
+    <div class="project-name-row" id="name-row">
+      <span class="project-name-display" id="name-display">…</span>
+      <button class="btn btn-ghost btn-rename" id="rename-btn">Đổi tên</button>
+    </div>
+    <div class="project-name-row" id="name-edit-row" style="display:none;">
+      <input class="project-name-input" id="name-input" type="text" maxlength="80" />
+      <button class="btn btn-primary btn-rename" id="name-save-btn">Lưu</button>
+      <button class="btn btn-ghost btn-rename" id="name-cancel-btn">Hủy</button>
+    </div>
+
+    <div class="detail-layout">
+      <!-- Files panel -->
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">📄 Tài liệu</span>
+        </div>
+
+        <ul class="file-list" id="file-list">
+          <li style="color:#888;font-size:.85rem;">Chưa có file nào.</li>
+        </ul>
+
+        <div class="upload-zone" id="upload-zone">
+          <input type="file" id="file-input" accept=".txt,.pdf,.docx" multiple />
+          <div class="upload-icon">📎</div>
+          <strong>Kéo thả file hoặc nhấn để chọn</strong>
+          <p>.txt, .pdf, .docx</p>
+        </div>
+        <div class="upload-status" id="upload-status"></div>
+      </div>
+
+      <!-- Sessions panel -->
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">💬 Cuộc trò chuyện</span>
+        </div>
+        <ul class="session-list-panel" id="session-list">
+          <li style="color:#888;font-size:.85rem;">Chưa có cuộc trò chuyện nào.</li>
+        </ul>
+        <button class="btn-new-chat" id="new-chat-btn">+ Chat với project này</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/project_detail.js"></script>
+</body>
+</html>

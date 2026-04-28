@@ -6,7 +6,7 @@ import uuid
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -29,6 +29,7 @@ TOP_K           = 8
 UPLOAD_DIR      = Path("./uploads")
 CHROMA_DIR      = "./chroma"
 CHATS_DIR       = Path("./chats")
+PROJECTS_DIR    = Path("./projects")
 CONTEXT_WINDOW  = int(os.getenv("CONTEXT_WINDOW", "131072"))  # DeepSeek V4 Pro: 128K
 
 SYSTEM_PROMPT = (
@@ -163,19 +164,27 @@ def embed_query(query: str) -> list[float]:
     return embed_texts([query])[0]
 
 
-def execute_search(query: str, top_k: int = 5) -> dict:
+def execute_search(query: str, top_k: int = 5, project_id: str | None = None) -> dict:
     """Run vector search and return chunks data + full context text."""
     try:
         q_embedding = embed_query(query)
     except Exception as e:
         return {"error": str(e), "chunks": [], "context": "", "metas": []}
 
-    k = min(max(1, top_k), 8, collection.count())
-    results = collection.query(
+    total = count_filtered(project_id)
+    if total == 0:
+        return {"error": None, "chunks": [], "context": "", "metas": []}
+
+    k = min(max(1, top_k), 8, total)
+    query_kwargs: dict = dict(
         query_embeddings=[q_embedding],
         n_results=k,
         include=["documents", "metadatas", "distances"],
     )
+    if project_id is not None:
+        query_kwargs["where"] = {"project_id": project_id}
+
+    results = collection.query(**query_kwargs)
     docs  = results["documents"][0]
     metas = results["metadatas"][0]
     dists = results["distances"][0]
@@ -212,6 +221,29 @@ def save_chat_session(session: dict):
     CHATS_DIR.mkdir(exist_ok=True)
     path = CHATS_DIR / f"{session['id']}.json"
     path.write_text(_json.dumps(session, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def load_project(project_id: str) -> dict | None:
+    path = PROJECTS_DIR / f"{project_id}.json"
+    if not path.exists():
+        return None
+    return _json.loads(path.read_text(encoding="utf-8"))
+
+
+def save_project(project: dict):
+    PROJECTS_DIR.mkdir(exist_ok=True)
+    path = PROJECTS_DIR / f"{project['id']}.json"
+    path.write_text(_json.dumps(project, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def count_filtered(project_id: str | None) -> int:
+    if project_id is None:
+        return collection.count()
+    try:
+        result = collection.get(where={"project_id": project_id}, include=[])
+        return len(result["ids"])
+    except Exception:
+        return 0
 
 
 def build_chat_histories(session: dict) -> tuple[list[dict], list[dict]]:
@@ -253,9 +285,9 @@ def chat_page():
 ALLOWED_EXTENSIONS = {".txt", ".pdf", ".docx"}
 
 
-@app.post("/upload")
-async def upload_file(file: UploadFile = File(...)):
-    suffix = Path(file.filename).suffix.lower()
+async def _index_file(file_bytes: bytes, filename: str, project_id: str | None = None) -> int:
+    """Index file bytes into ChromaDB. Returns chunk count."""
+    suffix = Path(filename).suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
         raise HTTPException(
             status_code=400,
@@ -263,11 +295,11 @@ async def upload_file(file: UploadFile = File(...)):
         )
 
     UPLOAD_DIR.mkdir(exist_ok=True)
-    save_path = UPLOAD_DIR / file.filename
-    save_path.write_bytes(await file.read())
+    save_path = UPLOAD_DIR / filename
+    save_path.write_bytes(file_bytes)
 
     try:
-        raw_text = extract_text(save_path, file.filename)
+        raw_text = extract_text(save_path, filename)
     except Exception as e:
         save_path.unlink(missing_ok=True)
         raise HTTPException(status_code=422, detail=f"Could not extract text: {e}")
@@ -286,26 +318,52 @@ async def upload_file(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Embedding API error: {e}")
 
-    ids = [f"{file.filename}__chunk_{i}__{uuid.uuid4().hex[:8]}" for i in range(len(chunks))]
-    metadatas = [{"source": file.filename, "chunk_index": i} for i in range(len(chunks))]
+    # If project_id provided: remove old chunks for this file in this project first (upsert)
+    if project_id:
+        try:
+            collection.delete(where={"project_id": project_id, "source": filename})
+        except Exception:
+            pass
 
-    collection.add(
-        ids=ids,
-        embeddings=embeddings,
-        documents=chunks,
-        metadatas=metadatas,
-    )
+    ids = [f"{filename}__chunk_{i}__{uuid.uuid4().hex[:8]}" for i in range(len(chunks))]
+    metadatas: list[dict] = [{"source": filename, "chunk_index": i} for i in range(len(chunks))]
+    if project_id:
+        for m in metadatas:
+            m["project_id"] = project_id
 
-    return {"success": True, "filename": file.filename, "chunks": len(chunks)}
+    collection.add(ids=ids, embeddings=embeddings, documents=chunks, metadatas=metadatas)
+    return len(chunks)
+
+
+@app.post("/upload")
+async def upload_file(file: UploadFile = File(...), project_id: str = Form(None)):
+    n_chunks = await _index_file(await file.read(), file.filename, project_id or None)
+
+    if project_id:
+        proj = load_project(project_id)
+        if not proj:
+            raise HTTPException(status_code=404, detail="Project not found.")
+        proj["files"] = [f for f in proj["files"] if f["filename"] != file.filename]
+        proj["files"].append({
+            "filename": file.filename,
+            "uploaded_at": datetime.datetime.now().isoformat(),
+            "chunks": n_chunks,
+        })
+        save_project(proj)
+
+    return {"success": True, "filename": file.filename, "chunks": n_chunks}
 
 
 # ── /files ───────────────────────────────────────────────────────────────────
 
 @app.get("/files")
-def list_files():
-    if collection.count() == 0:
+def list_files(project_id: str | None = Query(None)):
+    get_kwargs: dict = dict(include=["metadatas"])
+    if project_id is not None:
+        get_kwargs["where"] = {"project_id": project_id}
+    if count_filtered(project_id) == 0:
         return {"files": []}
-    results = collection.get(include=["metadatas"])
+    results = collection.get(**get_kwargs)
     seen: set[str] = set()
     files: list[str] = []
     for m in results["metadatas"]:
@@ -496,17 +554,20 @@ def ask_stream(body: AskRequest):
 # ── /chat/sessions ────────────────────────────────────────────────────────────
 
 @app.get("/chat/sessions")
-def list_chat_sessions():
+def list_chat_sessions(project_id: str | None = Query(None)):
     CHATS_DIR.mkdir(exist_ok=True)
     sessions = []
     for f in sorted(CHATS_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
         try:
             data = _json.loads(f.read_text(encoding="utf-8"))
+            if project_id is not None and data.get("project_id") != project_id:
+                continue
             sessions.append({
                 "id": data["id"],
                 "title": data.get("title", "Untitled"),
                 "created_at": data.get("created_at"),
                 "message_count": len(data.get("messages", [])),
+                "project_id": data.get("project_id"),
             })
         except Exception:
             pass
@@ -535,6 +596,7 @@ def delete_chat_session(session_id: str):
 class ChatRequest(BaseModel):
     session_id: str | None = None
     message: str
+    project_id: str | None = None
 
 
 @app.post("/chat/stream")
@@ -543,6 +605,7 @@ def chat_stream(body: ChatRequest):
     if not message:
         raise HTTPException(status_code=400, detail="Message must not be empty.")
 
+    project_id = body.project_id or None
     session_id = body.session_id
     session = load_chat_session(session_id) if session_id else None
     if not session:
@@ -552,9 +615,10 @@ def chat_stream(body: ChatRequest):
             "title": message[:60],
             "created_at": datetime.datetime.now().isoformat(),
             "messages": [],
+            "project_id": project_id,
         }
 
-    has_docs = collection.count() > 0
+    has_docs = count_filtered(project_id) > 0
 
     def event_stream():
         def send(obj: dict) -> str:
@@ -688,7 +752,7 @@ def chat_stream(body: ChatRequest):
 
                     if query:
                         yield send({"type": "activity", "message": "Đang mã hóa truy vấn và tìm trong vector database..."})
-                        result = execute_search(query, top_k)
+                        result = execute_search(query, top_k, project_id)
                         yield send({"type": "chunks", "chunks": result["chunks"], "query": query})
                         yield send({
                             "type": "activity",
@@ -807,3 +871,140 @@ def chat_stream(body: ChatRequest):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+# ── /projects ─────────────────────────────────────────────────────────────────
+
+class ProjectCreateRequest(BaseModel):
+    name: str
+
+class ProjectRenameRequest(BaseModel):
+    name: str
+
+
+@app.get("/projects")
+def list_projects():
+    PROJECTS_DIR.mkdir(exist_ok=True)
+    projects = []
+    for f in sorted(PROJECTS_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+        try:
+            data = _json.loads(f.read_text(encoding="utf-8"))
+            projects.append({
+                "id": data["id"],
+                "name": data.get("name", "Untitled"),
+                "created_at": data.get("created_at"),
+                "file_count": len(data.get("files", [])),
+            })
+        except Exception:
+            pass
+    return {"projects": projects}
+
+
+@app.post("/projects")
+def create_project(body: ProjectCreateRequest):
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Project name must not be empty.")
+    project_id = uuid.uuid4().hex
+    project = {
+        "id": project_id,
+        "name": name,
+        "created_at": datetime.datetime.now().isoformat(),
+        "files": [],
+    }
+    save_project(project)
+    return project
+
+
+@app.get("/projects/{project_id}")
+def get_project(project_id: str):
+    proj = load_project(project_id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found.")
+    return proj
+
+
+@app.patch("/projects/{project_id}")
+def rename_project(project_id: str, body: ProjectRenameRequest):
+    proj = load_project(project_id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found.")
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Project name must not be empty.")
+    proj["name"] = name
+    save_project(proj)
+    return proj
+
+
+@app.delete("/projects/{project_id}")
+def delete_project(project_id: str):
+    proj = load_project(project_id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found.")
+
+    try:
+        collection.delete(where={"project_id": project_id})
+    except Exception:
+        pass
+
+    CHATS_DIR.mkdir(exist_ok=True)
+    for f in CHATS_DIR.glob("*.json"):
+        try:
+            data = _json.loads(f.read_text(encoding="utf-8"))
+            if data.get("project_id") == project_id:
+                f.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    (PROJECTS_DIR / f"{project_id}.json").unlink(missing_ok=True)
+    return {"ok": True}
+
+
+@app.post("/projects/{project_id}/files")
+async def upload_project_file(project_id: str, file: UploadFile = File(...)):
+    proj = load_project(project_id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found.")
+
+    n_chunks = await _index_file(await file.read(), file.filename, project_id)
+
+    proj["files"] = [f for f in proj["files"] if f["filename"] != file.filename]
+    proj["files"].append({
+        "filename": file.filename,
+        "uploaded_at": datetime.datetime.now().isoformat(),
+        "chunks": n_chunks,
+    })
+    save_project(proj)
+    return {"success": True, "filename": file.filename, "chunks": n_chunks}
+
+
+@app.delete("/projects/{project_id}/files/{filename:path}")
+def delete_project_file(project_id: str, filename: str):
+    proj = load_project(project_id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found.")
+
+    if not any(f["filename"] == filename for f in proj.get("files", [])):
+        raise HTTPException(status_code=404, detail="File not found in project.")
+
+    try:
+        collection.delete(where={"project_id": project_id, "source": filename})
+    except Exception:
+        pass
+
+    proj["files"] = [f for f in proj["files"] if f["filename"] != filename]
+    save_project(proj)
+    return {"ok": True}
+
+
+# ── HTML pages for projects ───────────────────────────────────────────────────
+
+@app.get("/projects-page")
+def projects_page():
+    return FileResponse("static/projects.html")
+
+
+@app.get("/p/{project_id}")
+def project_detail_page(project_id: str):
+    return FileResponse("static/project_detail.html")
