@@ -347,6 +347,42 @@ body {
 
 .source-chip .src-idx { color: #999; }
 
+/* ── Agentic search step ─────────────────────────────────────────────────── */
+.msg-search-step {
+  border: 1px solid #d0dbf5;
+  border-radius: 7px;
+  overflow: hidden;
+  font-size: 0.79rem;
+}
+
+.search-step-header {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.38rem 0.65rem;
+  background: #f0f4ff;
+  color: #2a4ab5;
+  font-weight: 600;
+}
+
+.search-icon { font-size: 0.82rem; flex-shrink: 0; }
+
+.search-query {
+  font-style: italic;
+  font-weight: 400;
+  color: #4a7efa;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Chunks nested inside a search step lose their outer border-radius */
+.msg-search-step .msg-chunks {
+  border: none;
+  border-top: 1px solid #e2e6ed;
+  border-radius: 0;
+}
+
 /* ── Chunks inside bubble ────────────────────────────────────────────────── */
 .msg-chunks {
   border: 1px solid #e2e6ed;

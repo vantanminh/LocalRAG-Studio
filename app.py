@@ -43,6 +43,44 @@ CHAT_SYSTEM_PROMPT = (
     "Be conversational and concise. If the context doesn't have enough information, say so honestly."
 )
 
+AGENTIC_SYSTEM_PROMPT = (
+    "You are a helpful assistant with access to a document search tool. "
+    "When answering questions, use the search_documents tool to find relevant information from uploaded documents. "
+    "You can call the tool multiple times with different queries to gather comprehensive information. "
+    "Only give your final answer after you have gathered enough information. "
+    "If the documents don't contain relevant information after searching, say so honestly."
+)
+
+SEARCH_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "search_documents",
+        "description": (
+            "Search through uploaded documents to find relevant information. "
+            "Returns the most relevant document chunks for the given query."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The search query to find relevant information",
+                },
+                "top_k": {
+                    "type": "integer",
+                    "description": "Number of chunks to retrieve (1–8, default 5)",
+                    "default": 5,
+                    "minimum": 1,
+                    "maximum": 8,
+                },
+            },
+            "required": ["query"],
+        },
+    },
+}
+
+MAX_TOOL_CALLS = 5
+
 # ── clients ───────────────────────────────────────────────────────────────────
 
 if not OPENROUTER_API_KEY:
@@ -123,6 +161,44 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
 
 def embed_query(query: str) -> list[float]:
     return embed_texts([query])[0]
+
+
+def execute_search(query: str, top_k: int = 5) -> dict:
+    """Run vector search and return chunks data + full context text."""
+    try:
+        q_embedding = embed_query(query)
+    except Exception as e:
+        return {"error": str(e), "chunks": [], "context": "", "metas": []}
+
+    k = min(max(1, top_k), 8, collection.count())
+    results = collection.query(
+        query_embeddings=[q_embedding],
+        n_results=k,
+        include=["documents", "metadatas", "distances"],
+    )
+    docs  = results["documents"][0]
+    metas = results["metadatas"][0]
+    dists = results["distances"][0]
+
+    chunks_data = [
+        {
+            "source": m["source"],
+            "chunk_index": m["chunk_index"],
+            "preview": d[:400] + ("…" if len(d) > 400 else ""),
+            "score": round(1 - dists[i], 3),
+        }
+        for i, (d, m) in enumerate(zip(docs, metas))
+    ]
+    context_parts = [
+        f"[Source: {m['source']}, chunk {m['chunk_index']}]\n{d}"
+        for d, m in zip(docs, metas)
+    ]
+    return {
+        "error": None,
+        "chunks": chunks_data,
+        "context": "\n\n---\n\n".join(context_parts),
+        "metas": metas,
+    }
 
 
 def load_chat_session(session_id: str) -> dict | None:
@@ -460,95 +536,180 @@ def chat_stream(body: ChatRequest):
             "messages": [],
         }
 
+    has_docs = collection.count() > 0
+
     def event_stream():
         def send(obj: dict) -> str:
             return f"data: {_json.dumps(obj, ensure_ascii=False)}\n\n"
 
         yield send({"type": "session", "session_id": session_id})
 
-        # RAG retrieval (skip if no docs)
-        sources: list = []
-        if collection.count() > 0:
-            yield send({"type": "step", "message": "Đang tìm kiếm tài liệu liên quan..."})
-            try:
-                q_embedding = embed_query(message)
-            except Exception as e:
-                yield send({"type": "error", "message": f"Embedding error: {e}"})
-                return
+        # Build history with reasoning_content so DeepSeek thinking mode works
+        history = []
+        for m in session["messages"]:
+            msg: dict = {"role": m["role"], "content": m["content"]}
+            if m["role"] == "assistant" and m.get("reasoning_content"):
+                msg["reasoning_content"] = m["reasoning_content"]
+            history.append(msg)
 
-            results = collection.query(
-                query_embeddings=[q_embedding],
-                n_results=min(TOP_K, collection.count()),
-                include=["documents", "metadatas", "distances"],
+        all_sources:       list = []
+        seen_sources:      set  = set()
+        collected_context: list = []   # context blocks from all searches
+        usage = None
+
+        yield send({"type": "step", "message": "AI đang phân tích câu hỏi..."})
+
+        # ── Phase 1: Agentic tool-use loop (NO thinking) ───────────────────────
+        if has_docs:
+            tool_messages = (
+                [{"role": "system", "content": AGENTIC_SYSTEM_PROMPT}]
+                + history
+                + [{"role": "user", "content": message}]
             )
-            docs = results["documents"][0]
-            metas = results["metadatas"][0]
-            distances = results["distances"][0]
+            tool_call_count = 0
 
-            yield send({"type": "step", "message": f"Tìm thấy {len(docs)} đoạn văn liên quan"})
+            while tool_call_count < MAX_TOOL_CALLS:
+                try:
+                    stream = llm_client.chat.completions.create(
+                        model=LLM_MODEL,
+                        messages=tool_messages,
+                        tools=[SEARCH_TOOL],
+                        tool_choice="auto",
+                        stream=True,
+                    )
+                except Exception as e:
+                    yield send({"type": "error", "message": f"LLM error: {e}"})
+                    return
 
-            chunks_data = [
-                {
-                    "source": m["source"],
-                    "chunk_index": m["chunk_index"],
-                    "preview": d[:400] + ("…" if len(d) > 400 else ""),
-                    "score": round(1 - distances[i], 3),
-                }
-                for i, (d, m) in enumerate(zip(docs, metas))
-            ]
-            yield send({"type": "chunks", "chunks": chunks_data})
+                tool_call_acc: dict[int, dict] = {}
+                current_content = ""
 
-            context_parts = [
-                f"[Source: {m['source']}, chunk {m['chunk_index']}]\n{d}"
-                for d, m in zip(docs, metas)
-            ]
-            user_content = f"[Document context]\n{chr(10).join(context_parts)}\n\n[Question]\n{message}"
+                for chunk in stream:
+                    if not chunk.choices:
+                        continue
+                    delta = chunk.choices[0].delta
 
-            seen_src: set = set()
-            for m in metas:
-                key = (m["source"], m["chunk_index"])
-                if key not in seen_src:
-                    seen_src.add(key)
-                    sources.append({"source": m["source"], "chunk_index": m["chunk_index"]})
+                    if delta.tool_calls:
+                        for tc in delta.tool_calls:
+                            idx = tc.index
+                            if idx not in tool_call_acc:
+                                tool_call_acc[idx] = {"id": "", "name": "", "arguments": ""}
+                            if tc.id:
+                                tool_call_acc[idx]["id"] = tc.id
+                            if tc.function:
+                                if tc.function.name:
+                                    tool_call_acc[idx]["name"] += tc.function.name
+                                if tc.function.arguments:
+                                    tool_call_acc[idx]["arguments"] += tc.function.arguments
+                        continue
+
+                    if delta.content:
+                        current_content += delta.content
+
+                if not tool_call_acc:
+                    # AI decided no search needed — stop tool loop
+                    break
+
+                # Append assistant turn with tool_calls
+                tool_messages.append({
+                    "role":    "assistant",
+                    "content": current_content or None,
+                    "tool_calls": [
+                        {
+                            "id":   tc["id"],
+                            "type": "function",
+                            "function": {"name": tc["name"], "arguments": tc["arguments"]},
+                        }
+                        for tc in tool_call_acc.values()
+                    ],
+                })
+
+                # Execute tools and collect context
+                for tc in tool_call_acc.values():
+                    tool_call_count += 1
+
+                    if tc["name"] != "search_documents":
+                        tool_messages.append({
+                            "role": "tool", "tool_call_id": tc["id"], "content": "Unknown tool.",
+                        })
+                        continue
+
+                    try:
+                        args  = _json.loads(tc["arguments"])
+                        query = args.get("query", "").strip()
+                        top_k = int(args.get("top_k", 5))
+                    except Exception:
+                        query, top_k = "", 5
+
+                    yield send({"type": "tool_call", "query": query})
+
+                    if query:
+                        result = execute_search(query, top_k)
+                        yield send({"type": "chunks", "chunks": result["chunks"], "query": query})
+
+                        for m in result["metas"]:
+                            key = (m["source"], m["chunk_index"])
+                            if key not in seen_sources:
+                                seen_sources.add(key)
+                                all_sources.append({"source": m["source"], "chunk_index": m["chunk_index"]})
+
+                        if not result["error"]:
+                            collected_context.append(result["context"])
+                        tool_content = result["context"] if not result["error"] else f"Search error: {result['error']}"
+                    else:
+                        tool_content = "Error: empty query provided."
+
+                    tool_messages.append({
+                        "role": "tool", "tool_call_id": tc["id"], "content": tool_content,
+                    })
+
+                yield send({"type": "step", "message": "Đang phân tích kết quả tìm kiếm..."})
+
+        # ── Phase 2: Final synthesis (thinking enabled, clean message thread) ──
+        if collected_context:
+            context_block = "\n\n---\n\n".join(collected_context)
+            synthesis_user_content = (
+                f"[Document context from searches]\n{context_block}\n\n"
+                f"[Question]\n{message}"
+            )
         else:
-            user_content = message
+            synthesis_user_content = message
 
-        # Build multi-turn messages
-        history = [{"role": m["role"], "content": m["content"]} for m in session["messages"]]
-        messages_to_send = (
+        synthesis_messages = (
             [{"role": "system", "content": CHAT_SYSTEM_PROMPT}]
             + history
-            + [{"role": "user", "content": user_content}]
+            + [{"role": "user", "content": synthesis_user_content}]
         )
 
-        yield send({"type": "step", "message": "Đang tạo câu trả lời..."})
+        yield send({"type": "step", "message": "Đang tổng hợp câu trả lời..."})
 
-        full_answer = ""
+        full_answer   = ""
         full_thinking = ""
-        usage = None
+        thinking_started  = False
+        answering_started = False
 
         try:
             stream = llm_client.chat.completions.create(
                 model=LLM_MODEL,
-                messages=messages_to_send,
+                messages=synthesis_messages,
                 stream=True,
                 stream_options={"include_usage": True},
                 extra_body={"thinking": {"type": "enabled"}},
             )
-            thinking_started = False
-            answering_started = False
             for chunk in stream:
                 if getattr(chunk, "usage", None):
                     usage = {
-                        "prompt_tokens": chunk.usage.prompt_tokens,
+                        "prompt_tokens":     chunk.usage.prompt_tokens,
                         "completion_tokens": chunk.usage.completion_tokens,
-                        "total_tokens": chunk.usage.total_tokens,
+                        "total_tokens":      chunk.usage.total_tokens,
                     }
                 if not chunk.choices:
                     continue
                 delta = chunk.choices[0].delta
+
                 reasoning = getattr(delta, "reasoning_content", None) or ""
-                content = delta.content or ""
+                content   = delta.content or ""
+
                 if reasoning:
                     full_thinking += reasoning
                     if not thinking_started:
@@ -556,6 +717,7 @@ def chat_stream(body: ChatRequest):
                         yield send({"type": "thinking_start"})
                         yield send({"type": "step", "message": "Đang suy nghĩ..."})
                     yield send({"type": "thinking_token", "content": reasoning})
+
                 if content:
                     full_answer += content
                     if not answering_started:
@@ -564,28 +726,31 @@ def chat_stream(body: ChatRequest):
                             yield send({"type": "thinking_end"})
                         yield send({"type": "step", "message": "Đang viết câu trả lời..."})
                     yield send({"type": "token", "content": content})
+
         except Exception as e:
             yield send({"type": "error", "message": f"LLM error: {e}"})
             return
 
+        # ── Persist session ────────────────────────────────────────────────────
         now = datetime.datetime.now().isoformat()
         session["messages"].append({"role": "user", "content": message, "timestamp": now})
         session["messages"].append({
-            "role": "assistant",
-            "content": full_answer,
-            "thinking": full_thinking,
-            "sources": sources,
-            "timestamp": now,
-            "usage": usage,
+            "role":             "assistant",
+            "content":          full_answer,
+            "thinking":         full_thinking,   # for display in UI
+            "reasoning_content": full_thinking,  # for DeepSeek multi-turn pass-back
+            "sources":          all_sources,
+            "timestamp":        now,
+            "usage":            usage,
         })
         session["last_usage"] = usage
         save_chat_session(session)
 
         yield send({
-            "type": "done",
-            "sources": sources,
-            "session_id": session_id,
-            "usage": usage,
+            "type":           "done",
+            "sources":        all_sources,
+            "session_id":     session_id,
+            "usage":          usage,
             "context_window": CONTEXT_WINDOW,
         })
 

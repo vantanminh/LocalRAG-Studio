@@ -183,6 +183,17 @@ function buildThinkingEl(initialText, active) {
   return el;
 }
 
+function buildSearchStepEl(query) {
+  const el = document.createElement('div');
+  el.className = 'msg-search-step';
+  el.innerHTML =
+    `<div class="search-step-header">` +
+      `<span class="search-icon">🔍</span>` +
+      `<span class="search-query">${esc(query)}</span>` +
+    `</div>`;
+  return el;
+}
+
 function buildChunksEl(chunks) {
   const el = document.createElement('div');
   el.className = 'msg-chunks';
@@ -251,6 +262,7 @@ async function sendMessage() {
   let thinkContent = null;
   let thinkingText = '';
   let thinkingActive = false;
+  let lastSearchEl  = null;
 
   try {
     const res = await fetch('/chat/stream', {
@@ -295,12 +307,23 @@ async function sendMessage() {
             if (statusEl.parentNode) statusText.textContent = event.message;
             break;
 
-          case 'chunks':
-            if (statusEl.parentNode) {
-              const chunksEl = buildChunksEl(event.chunks);
+          case 'tool_call':
+            lastSearchEl = buildSearchStepEl(event.query);
+            bodyEl.insertBefore(lastSearchEl, bubbleEl);
+            if (statusEl.parentNode) statusText.textContent = `Đang tìm kiếm: "${event.query}"`;
+            scrollBottom();
+            break;
+
+          case 'chunks': {
+            const chunksEl = buildChunksEl(event.chunks);
+            if (lastSearchEl) {
+              lastSearchEl.appendChild(chunksEl);
+            } else {
               bodyEl.insertBefore(chunksEl, bubbleEl);
             }
+            scrollBottom();
             break;
+          }
 
           case 'thinking_start':
             thinkingActive = true;
