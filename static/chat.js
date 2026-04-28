@@ -26,7 +26,6 @@ const initSession = urlParams.get('session_id') || null;
 async function init() {
   if (projectId) showProjectBanner();
   await refreshSessionList();
-  // If a specific session was requested via URL param, load it
   if (initSession) {
     await loadSession(initSession);
   } else if (!projectId) {
@@ -132,7 +131,6 @@ function startNewChat() {
   welcomeEl.style.display = 'flex';
   setActiveSession(null);
   ctxBar.style.display = 'none';
-  // Remove session_id from URL without reload
   if (projectId) {
     const u = new URL(window.location.href);
     u.searchParams.delete('session_id');
@@ -159,7 +157,7 @@ function renderHistory(messages) {
       }
 
       const bubbleEl = bodyEl.querySelector('.msg-bubble');
-      bubbleEl.textContent = msg.content;
+      bubbleEl.innerHTML = renderMarkdown(msg.content);
       bubbleEl.style.display = 'block';
 
       if (msg.sources?.length) appendSources(bodyEl, msg.sources);
@@ -220,61 +218,6 @@ function buildThinkingEl(initialText, active) {
   return el;
 }
 
-function buildSearchStepEl(query) {
-  const el = document.createElement('div');
-  el.className = 'msg-search-step';
-  el.innerHTML =
-    `<div class="search-step-header">` +
-      `<span class="search-icon">🔍</span>` +
-      `<span class="search-query">${esc(query)}</span>` +
-    `</div>`;
-  return el;
-}
-
-function buildActivityEl(message) {
-  const el = document.createElement('div');
-  el.className = 'msg-activity';
-  el.innerHTML =
-    `<span class="activity-dot"></span>` +
-    `<span class="activity-text">${esc(message)}</span>`;
-  return el;
-}
-
-function buildChunksEl(chunks) {
-  const el = document.createElement('div');
-  el.className = 'msg-chunks';
-  el.innerHTML =
-    `<div class="chunks-header">` +
-      `<span>${chunks.length} đoạn văn tìm được</span>` +
-      `<span class="toggle-icon">▼</span>` +
-    `</div>` +
-    `<div class="chunks-list hidden"></div>`;
-
-  const list   = el.querySelector('.chunks-list');
-  const header = el.querySelector('.chunks-header');
-  const icon   = el.querySelector('.toggle-icon');
-
-  chunks.forEach(c => {
-    const row = document.createElement('div');
-    row.className = 'chunk-row';
-    row.innerHTML =
-      `<div class="chunk-row-meta">` +
-        `<span class="c-src">${esc(c.source)}</span>` +
-        `<span class="c-idx">chunk ${c.chunk_index}</span>` +
-        `<span class="c-score">${(c.score * 100).toFixed(1)}%</span>` +
-      `</div>` +
-      `<div class="chunk-row-preview">${esc(c.preview)}</div>`;
-    list.appendChild(row);
-  });
-
-  header.addEventListener('click', () => {
-    list.classList.toggle('hidden');
-    icon.textContent = list.classList.contains('hidden') ? '▼' : '▲';
-  });
-
-  return el;
-}
-
 function appendSources(bodyEl, sources) {
   const sourcesEl = bodyEl.querySelector('.msg-sources');
   sourcesEl.style.display = 'flex';
@@ -284,6 +227,12 @@ function appendSources(bodyEl, sources) {
     chip.innerHTML = `${esc(source)} <span class="src-idx">#${chunk_index}</span>`;
     sourcesEl.appendChild(chip);
   });
+}
+
+// ── Markdown renderer ─────────────────────────────────────────────────────────
+function renderMarkdown(text) {
+  if (typeof marked === 'undefined') return esc(text);
+  return marked.parse(text);
 }
 
 // ── Send ──────────────────────────────────────────────────────────────────────
@@ -304,11 +253,54 @@ async function sendMessage() {
   const statusText = bodyEl.querySelector('.status-text');
   const bubbleEl   = bodyEl.querySelector('.msg-bubble');
 
+  // thinking state
   let thinkingEl   = null;
   let thinkContent = null;
   let thinkingText = '';
-  let thinkingActive = false;
-  let lastSearchEl  = null;
+
+  // search trace state
+  let traceEl         = null;
+  let traceStatusEl   = null;
+  let traceDetailEl   = null;
+  let traceQueryCount = 0;
+  let traceChunkCount = 0;
+  let lastQueryRowEl  = null;
+
+  // response accumulator for markdown rendering
+  let responseText = '';
+
+  function ensureTrace() {
+    if (traceEl) return;
+    traceEl = document.createElement('div');
+    traceEl.className = 'msg-search-trace active';
+    traceEl.innerHTML =
+      `<div class="trace-header">` +
+        `<span class="trace-dot"></span>` +
+        `<span class="trace-status">Đang tra cứu...</span>` +
+        `<span class="trace-toggle">▼</span>` +
+      `</div>` +
+      `<div class="trace-detail hidden"></div>`;
+    traceStatusEl = traceEl.querySelector('.trace-status');
+    traceDetailEl = traceEl.querySelector('.trace-detail');
+    const hdr  = traceEl.querySelector('.trace-header');
+    const icon = traceEl.querySelector('.trace-toggle');
+    hdr.addEventListener('click', () => {
+      traceDetailEl.classList.toggle('hidden');
+      icon.textContent = traceDetailEl.classList.contains('hidden') ? '▼' : '▲';
+    });
+    bodyEl.insertBefore(traceEl, bubbleEl);
+  }
+
+  function finalizeTrace() {
+    if (!traceEl) return;
+    traceEl.classList.remove('active');
+    if (traceQueryCount > 0) {
+      traceStatusEl.textContent =
+        `${traceQueryCount} truy vấn · ${traceChunkCount} đoạn tìm được`;
+    }
+    traceDetailEl.classList.add('hidden');
+    traceEl.querySelector('.trace-toggle').textContent = '▼';
+  }
 
   try {
     const res = await fetch('/chat/stream', {
@@ -354,31 +346,40 @@ async function sendMessage() {
             break;
 
           case 'activity':
-            bodyEl.insertBefore(buildActivityEl(event.message), bubbleEl);
+            ensureTrace();
+            traceStatusEl.textContent = event.message;
             if (statusEl.parentNode) statusText.textContent = event.message;
             scrollBottom();
             break;
 
-          case 'tool_call':
-            lastSearchEl = buildSearchStepEl(event.query);
-            bodyEl.insertBefore(lastSearchEl, bubbleEl);
-            if (statusEl.parentNode) statusText.textContent = `Đang tìm kiếm: "${event.query}"`;
-            scrollBottom();
-            break;
-
-          case 'chunks': {
-            const chunksEl = buildChunksEl(event.chunks);
-            if (lastSearchEl) {
-              lastSearchEl.appendChild(chunksEl);
-            } else {
-              bodyEl.insertBefore(chunksEl, bubbleEl);
-            }
+          case 'tool_call': {
+            ensureTrace();
+            traceQueryCount++;
+            traceDetailEl.classList.remove('hidden');
+            traceEl.querySelector('.trace-toggle').textContent = '▲';
+            const qRow = document.createElement('div');
+            qRow.className = 'trace-query-row';
+            qRow.innerHTML =
+              `<span class="trace-q-icon">🔍</span>` +
+              `<span class="trace-q-text">${esc(event.query)}</span>` +
+              `<span class="trace-q-count"></span>`;
+            traceDetailEl.appendChild(qRow);
+            lastQueryRowEl = qRow;
+            if (statusEl.parentNode) statusText.textContent = `Đang tìm kiếm...`;
             scrollBottom();
             break;
           }
 
+          case 'chunks':
+            if (lastQueryRowEl) {
+              traceChunkCount += event.chunks.length;
+              lastQueryRowEl.querySelector('.trace-q-count').textContent =
+                `${event.chunks.length} đoạn`;
+            }
+            scrollBottom();
+            break;
+
           case 'thinking_start':
-            thinkingActive = true;
             thinkingEl = buildThinkingEl('', true);
             thinkContent = thinkingEl.querySelector('.thinking-content');
             bodyEl.insertBefore(thinkingEl, bubbleEl);
@@ -396,11 +397,10 @@ async function sendMessage() {
 
           case 'thinking_end':
             if (thinkingEl) {
-              thinkingActive = false;
               thinkingEl.querySelector('.thinking-dot').classList.remove('active');
               thinkingEl.querySelector('.thinking-label').textContent =
                 `Đã suy nghĩ (${thinkingText.length} ký tự)`;
-              thinkContent.classList.add('hidden');
+              thinkingEl.querySelector('.thinking-content').classList.add('hidden');
               thinkingEl.querySelector('.thinking-toggle-icon').textContent = '▼';
             }
             break;
@@ -411,12 +411,15 @@ async function sendMessage() {
               bubbleEl.style.display = 'block';
               bubbleEl.classList.add('streaming');
             }
-            bubbleEl.textContent += event.content;
+            responseText += event.content;
+            bubbleEl.innerHTML = renderMarkdown(responseText);
             scrollBottom();
             break;
 
           case 'done':
             bubbleEl.classList.remove('streaming');
+            finalizeTrace();
+            if (responseText) bubbleEl.innerHTML = renderMarkdown(responseText);
             if (event.sources?.length) appendSources(bodyEl, event.sources);
             if (event.usage) updateCtxBar(event.usage, event.context_window || 131072);
             await refreshSessionList();

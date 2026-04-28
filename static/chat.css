@@ -225,7 +225,86 @@ body {
   color: #1a1a2e;
   border: 1px solid #e2e6ed;
   border-bottom-left-radius: 3px;
+  white-space: normal;
 }
+
+/* ── Markdown inside assistant bubble ───────────────────────────────────── */
+.msg.assistant .msg-bubble p { margin-bottom: 0.6rem; }
+.msg.assistant .msg-bubble p:last-child { margin-bottom: 0; }
+
+.msg.assistant .msg-bubble h1,
+.msg.assistant .msg-bubble h2,
+.msg.assistant .msg-bubble h3 {
+  font-weight: 700;
+  margin: 0.85rem 0 0.35rem;
+  line-height: 1.3;
+  color: #111827;
+}
+.msg.assistant .msg-bubble h1 { font-size: 1.05rem; }
+.msg.assistant .msg-bubble h2 { font-size: 0.97rem; }
+.msg.assistant .msg-bubble h3 { font-size: 0.91rem; }
+
+.msg.assistant .msg-bubble ul,
+.msg.assistant .msg-bubble ol {
+  padding-left: 1.4rem;
+  margin-bottom: 0.6rem;
+}
+.msg.assistant .msg-bubble li { margin-bottom: 0.22rem; line-height: 1.6; }
+
+.msg.assistant .msg-bubble strong { font-weight: 700; color: #111; }
+.msg.assistant .msg-bubble em { font-style: italic; }
+
+.msg.assistant .msg-bubble code {
+  background: #f1f3f5;
+  border-radius: 4px;
+  padding: 0.1rem 0.35rem;
+  font-family: 'Fira Code', 'Consolas', monospace;
+  font-size: 0.83em;
+  color: #c0392b;
+}
+
+.msg.assistant .msg-bubble pre {
+  background: #1e1e2e;
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+  overflow-x: auto;
+  margin: 0.5rem 0;
+}
+.msg.assistant .msg-bubble pre code {
+  background: none;
+  color: #cdd6f4;
+  padding: 0;
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+.msg.assistant .msg-bubble blockquote {
+  border-left: 3px solid #4a7efa;
+  padding-left: 0.75rem;
+  color: #555;
+  margin: 0.5rem 0;
+  font-style: italic;
+}
+
+.msg.assistant .msg-bubble hr {
+  border: none;
+  border-top: 1px solid #e2e6ed;
+  margin: 0.75rem 0;
+}
+
+.msg.assistant .msg-bubble table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.84rem;
+  margin: 0.5rem 0;
+}
+.msg.assistant .msg-bubble th,
+.msg.assistant .msg-bubble td {
+  border: 1px solid #e2e6ed;
+  padding: 0.3rem 0.6rem;
+  text-align: left;
+}
+.msg.assistant .msg-bubble th { background: #f5f7ff; font-weight: 600; }
 
 /* Streaming cursor */
 .msg-bubble.streaming::after {
@@ -350,138 +429,91 @@ body {
 
 .source-chip .src-idx { color: #999; }
 
-/* ── Streaming activity ──────────────────────────────────────────────────── */
-.msg-activity {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  padding: 0.25rem 0.1rem;
-  color: #6a7280;
-  font-size: 0.77rem;
-  line-height: 1.35;
-}
-
-.activity-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #6c8cff;
-  flex-shrink: 0;
-  animation: activity-pulse 1.2s ease-in-out infinite;
-}
-
-.activity-text {
-  overflow-wrap: anywhere;
-}
-
 @keyframes activity-pulse {
   0%, 100% { opacity: 0.35; transform: scale(0.85); }
   50%      { opacity: 1; transform: scale(1); }
 }
 
-/* ── Agentic search step ─────────────────────────────────────────────────── */
-.msg-search-step {
-  border: 1px solid #d0dbf5;
-  border-radius: 7px;
+/* ── Search Trace (compact collapsible) ──────────────────────────────────── */
+.msg-search-trace {
+  border: 1px solid #e2e6ed;
+  border-radius: 8px;
   overflow: hidden;
   font-size: 0.79rem;
 }
 
-.search-step-header {
+.trace-header {
   display: flex;
   align-items: center;
   gap: 0.45rem;
-  padding: 0.38rem 0.65rem;
-  background: #f0f4ff;
-  color: #2a4ab5;
-  font-weight: 600;
+  padding: 0.36rem 0.65rem;
+  background: #f5f7ff;
+  cursor: pointer;
+  color: #4a6fa5;
+  font-weight: 500;
+  transition: background 0.12s;
+  user-select: none;
+  min-height: 30px;
 }
 
-.search-icon { font-size: 0.82rem; flex-shrink: 0; }
+.trace-header:hover { background: #eaeffb; }
 
-.search-query {
-  font-style: italic;
-  font-weight: 400;
+.trace-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #a0b0d0;
+  flex-shrink: 0;
+  transition: background 0.2s;
+}
+
+.msg-search-trace.active .trace-dot {
+  background: #4a7efa;
+  animation: activity-pulse 1.2s ease-in-out infinite;
+}
+
+.trace-status { flex: 1; font-size: 0.76rem; }
+
+.trace-toggle { font-size: 0.65rem; color: #bbb; }
+
+.trace-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.3rem 0.5rem;
+  background: #fff;
+  border-top: 1px solid #eef0f5;
+}
+
+.trace-detail.hidden { display: none; }
+
+.trace-query-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.18rem 0.1rem;
+  font-size: 0.74rem;
+}
+
+.trace-q-icon { flex-shrink: 0; opacity: 0.6; }
+
+.trace-q-text {
+  flex: 1;
   color: #4a7efa;
+  font-style: italic;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-/* Chunks nested inside a search step lose their outer border-radius */
-.msg-search-step .msg-chunks {
-  border: none;
-  border-top: 1px solid #e2e6ed;
-  border-radius: 0;
-}
-
-/* ── Chunks inside bubble ────────────────────────────────────────────────── */
-.msg-chunks {
-  border: 1px solid #e2e6ed;
-  border-radius: 7px;
-  overflow: hidden;
-  font-size: 0.79rem;
-}
-
-.chunks-header {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.38rem 0.65rem;
-  background: #f5f7ff;
-  cursor: pointer;
-  color: #2a4ab5;
-  font-weight: 600;
-  transition: background 0.12s;
-}
-
-.chunks-header:hover { background: #eaeffb; }
-.chunks-header .toggle-icon { margin-left: auto; font-size: 0.68rem; color: #bbb; }
-
-.chunks-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-  padding: 0.5rem;
-  background: #fff;
-  max-height: 200px;
-  overflow-y: auto;
-}
-
-.chunks-list.hidden { display: none; }
-
-.chunk-row {
-  border: 1px solid #e8ecf5;
-  border-radius: 5px;
-  padding: 0.45rem 0.6rem;
-  background: #fafbfc;
-}
-
-.chunk-row-meta {
-  display: flex;
-  gap: 0.4rem;
-  align-items: center;
-  margin-bottom: 0.2rem;
-  font-size: 0.73rem;
-}
-
-.chunk-row-meta .c-src { font-weight: 600; color: #2a4ab5; }
-.chunk-row-meta .c-idx { color: #aaa; }
-.chunk-row-meta .c-score {
-  margin-left: auto;
+.trace-q-count {
+  flex-shrink: 0;
+  font-size: 0.7rem;
   background: #eafaf1;
   color: #1a7a42;
   font-weight: 600;
-  padding: 0.05rem 0.35rem;
-  border-radius: 4px;
-}
-
-.chunk-row-preview {
-  color: #555;
-  font-size: 0.76rem;
-  line-height: 1.4;
-  white-space: pre-wrap;
-  word-break: break-word;
+  padding: 0.03rem 0.3rem;
+  border-radius: 3px;
 }
 
 /* ── Context bar ─────────────────────────────────────────────────────────── */
