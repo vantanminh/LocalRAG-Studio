@@ -61,7 +61,7 @@ body {
 }
 
 .session-empty {
-  color: #444;
+  color: #6a7a9a;
   font-size: 0.8rem;
   text-align: center;
   padding: 2rem 1rem;
@@ -94,7 +94,7 @@ body {
 
 .session-meta {
   font-size: 0.7rem;
-  color: #555;
+  color: #6a7a9a;
   margin-top: 0.1rem;
 }
 
@@ -121,16 +121,17 @@ body {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
 }
 
 .back-link {
-  color: #444;
-  font-size: 0.8rem;
+  color: #7a8aaa;
+  font-size: 0.82rem;
   text-decoration: none;
   transition: color 0.15s;
+  padding: 0.25rem 0;
 }
-.back-link:hover { color: #888; }
+.back-link:hover { color: #bbc8e8; }
 
 /* ── Main ────────────────────────────────────────────────────────────────── */
 .chat-main {
@@ -778,3 +779,71 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #ddd; border-radius: 3px; }
 .sidebar ::-webkit-scrollbar-thumb { background: #2a2a45; }
+
+/* ── Sidebar toggle (mobile) ─────────────────────────────────────────────── */
+.sidebar-toggle {
+  display: none;
+  position: fixed;
+  top: 0.75rem;
+  left: 0.75rem;
+  z-index: 200;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: #12122a;
+  color: #e0e4f0;
+  border: 1px solid #1e1e3a;
+  cursor: pointer;
+  font-size: 1.1rem;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+.sidebar-toggle:hover { background: #1e1e3a; }
+
+.sidebar-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  z-index: 99;
+  backdrop-filter: blur(2px);
+}
+
+/* ── Responsive ──────────────────────────────────────────────────────────── */
+@media (max-width: 680px) {
+  .sidebar-toggle {
+    display: flex;
+  }
+
+  .sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    z-index: 100;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    box-shadow: 4px 0 24px rgba(0,0,0,0.3);
+  }
+
+  .sidebar.open {
+    transform: translateX(0);
+  }
+
+  .sidebar-overlay.open {
+    display: block;
+  }
+
+  .chat-main {
+    padding-top: 0;
+  }
+
+  .messages {
+    padding: 1rem 0.9rem;
+  }
+
+  .input-bar {
+    padding: 0.6rem 0.9rem;
+  }
+}

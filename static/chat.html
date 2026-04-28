@@ -7,10 +7,13 @@
   <link rel="stylesheet" href="/static/chat.css" />
 </head>
 <body>
+  <button class="sidebar-toggle" id="sidebar-toggle" aria-label="Toggle sidebar">☰</button>
+  <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
   <div class="chat-layout">
 
     <!-- Sidebar -->
-    <aside class="sidebar">
+    <aside class="sidebar" id="sidebar">
       <div class="sidebar-header">
         <span class="sidebar-title">RAG Chat</span>
         <button class="btn-new" id="new-chat-btn">+ New</button>
@@ -80,5 +83,18 @@
   </div>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script src="/static/chat.js"></script>
+  <script>
+    const sidebarToggle = document.getElementById('sidebar-toggle');
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebar-overlay');
+    sidebarToggle.addEventListener('click', () => {
+      sidebar.classList.toggle('open');
+      overlay.classList.toggle('open');
+    });
+    overlay.addEventListener('click', () => {
+      sidebar.classList.remove('open');
+      overlay.classList.remove('open');
+    });
+  </script>
 </body>
 </html>
