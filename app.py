@@ -180,6 +180,27 @@ def chunk_text(text: str) -> list[str]:
     return [c.strip() for c in chunks if c.strip()]
 
 
+def _flatten_json(obj, prefix: str = "") -> list[str]:
+    """Recursively flatten a JSON object into readable text lines."""
+    lines = []
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            key = f"{prefix}.{k}" if prefix else str(k)
+            if isinstance(v, (dict, list)):
+                lines.extend(_flatten_json(v, key))
+            elif v is not None and str(v).strip():
+                lines.append(f"{key}: {v}")
+    elif isinstance(obj, list):
+        for i, item in enumerate(obj):
+            key = f"{prefix}[{i}]" if prefix else f"[{i}]"
+            if isinstance(item, (dict, list)):
+                lines.extend(_flatten_json(item, key))
+                lines.append("")  # blank line between records
+            elif item is not None and str(item).strip():
+                lines.append(f"{key}: {item}")
+    return lines
+
+
 def extract_text(file_path: Path, filename: str) -> str:
     suffix = Path(filename).suffix.lower()
     if suffix == ".txt":
@@ -192,6 +213,17 @@ def extract_text(file_path: Path, filename: str) -> str:
         from docx import Document
         doc = Document(str(file_path))
         return "\n".join(p.text for p in doc.paragraphs)
+    elif suffix == ".json":
+        import json as _json
+        raw = file_path.read_text(encoding="utf-8", errors="replace")
+        try:
+            data = _json.loads(raw)
+        except _json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON: {e}")
+        if isinstance(data, str):
+            return data
+        lines = _flatten_json(data)
+        return "\n".join(lines) if lines else raw
     else:
         raise ValueError(f"Unsupported file type: {suffix}")
 
@@ -375,7 +407,7 @@ def chat_page():
 
 # ── /upload ───────────────────────────────────────────────────────────────────
 
-ALLOWED_EXTENSIONS = {".txt", ".pdf", ".docx"}
+ALLOWED_EXTENSIONS = {".txt", ".pdf", ".docx", ".json"}
 
 
 async def _index_file(file_bytes: bytes, filename: str, project_id: str | None = None) -> int:
@@ -384,7 +416,7 @@ async def _index_file(file_bytes: bytes, filename: str, project_id: str | None =
     if suffix not in ALLOWED_EXTENSIONS:
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported file type '{suffix}'. Allowed: .txt, .pdf, .docx",
+            detail=f"Unsupported file type '{suffix}'. Allowed: .txt, .pdf, .docx, .json",
         )
 
     UPLOAD_DIR.mkdir(exist_ok=True)
